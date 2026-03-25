@@ -6,7 +6,7 @@ We are building a reinforcement learning pipeline that trains an LLM agent (Llam
 
 ## Hardware & Model
 
-We have 2× A100-80GB GPUs. GPU 1 handles rollout collection (running 512 episodes in parallel with async GPT-4o-mini API calls), while GPU 0 handles the PPO training update. The agent is Llama-3.1-8B-Instruct with LoRA (rank=16) applied to all attention and MLP projection layers — only ~40M parameters are trained, the rest of the 8B model is frozen. Three small MLP value heads sit on top of the LLM's hidden state and predict expected future reward, question cost, and turn cost respectively; these are used to compute GAE advantages for PPO. A frozen copy of the initial model serves as the reference policy for a KL penalty that prevents the agent from drifting too far from sensible language.
+We have 2× A100-40GB GPUs (80GB total). **Llama-3.1-8B-Instruct remains the right model choice** — its bf16 weights occupy 16GB, leaving ~24GB headroom per GPU for activations, KV cache, and optimizer states. GPU 0 handles PPO training (model weights + LoRA gradients + 8-bit AdamW optimizer + value heads + gradient checkpointing to cap activation memory at ~3GB). GPU 1 holds a frozen inference copy of the model for rollout collection and the reference policy for KL penalty — these share the same 16GB base weights, so only one full copy per GPU is needed. The tighter VRAM compared to 80GB cards means we reduce rollout batch size from 512 → 256, PPO mini-batch from 32 → 16, max sequence length from 2048 → 1536, and enable gradient checkpointing. Everything else stays the same. The agent uses LoRA rank=16 on all attention and MLP projection layers (~40M trainable params); three small MLP value heads predict expected future reward, question cost, and turn cost from the LLM's 4096-dim hidden state.
 
 ## Pipeline Components
 
@@ -20,28 +20,31 @@ We have 2× A100-80GB GPUs. GPU 1 handles rollout collection (running 512 episod
 
 ## Training Loop (one iteration)
 
-1. **Rollout**: Run 512 episodes in parallel. Each episode: reset with a problem → agent generates action → environment steps (simulator or executor) → store (state, action, log_prob, reward, cost_q, cost_t) in buffer.
+1. **Rollout**: Run 256 episodes in parallel. Each episode: reset with a problem → agent generates action → environment steps (simulator or executor) → store (state, action, log_prob, reward, cost_q, cost_t) in buffer.
 2. **Advantage computation**: Use GAE with `γ=1.0, λ=0.95` on all three return streams. Combine into `A_lagrangian = A_reward - λ₁·A_q_cost - λ₂·A_t_cost`.
-3. **PPO update**: 4 epochs over the buffer in mini-batches of 32. Clip ratio at 0.2. Add KL penalty (`coeff=0.05`) and entropy bonus (`coeff=0.01`). Backprop only through LoRA weights.
+3. **PPO update**: 4 epochs over the buffer in mini-batches of 16. Clip ratio at 0.2. Add KL penalty (`coeff=0.05`) and entropy bonus (`coeff=0.01`). Backprop only through LoRA weights.
 4. **Lagrange update**: `λ₁ += lr_λ × (avg_questions_this_batch - d₁)`. If agent asked too many questions, `λ₁` rises, making questions more expensive next iteration — and vice versa.
 5. Repeat for 80 iterations per `d₁` setting.
 
 ## Key Hyperparameters
 
 ```yaml
-model:           meta-llama/Llama-3.1-8B-Instruct
+# Hardware: 2× A100-40GB
+model:           meta-llama/Llama-3.1-8B-Instruct   # 16GB bf16; fits on 40GB with room
 lora_rank:       16
 lora_alpha:      32
 lora_targets:    [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+gradient_checkpointing: true    # keeps activation memory ~3GB instead of ~10GB
 
-rollout_batch_size:    512
+rollout_batch_size:    256      # reduced from 512 (40GB vs 80GB)
 max_turns:             6
-max_new_tokens:        300
-temperature:           0.8        # agent during rollout
-user_sim_temperature:  0.0        # GPT-4o-mini (deterministic environment)
+max_new_tokens:        256      # reduced from 300 to save KV cache memory
+max_seq_len:           1536     # reduced from 2048; episodes rarely exceed this
+temperature:           0.8      # agent during rollout
+user_sim_temperature:  0.0      # GPT-4o-mini (deterministic environment)
 
 ppo_epochs:            4
-ppo_mini_batch_size:   32
+ppo_mini_batch_size:   16       # reduced from 32 (fits comfortably in 40GB)
 clip_epsilon:          0.2
 gamma:                 1.0
 gae_lambda:            0.95
@@ -50,9 +53,30 @@ entropy_coeff:         0.01
 lr_policy:             5e-6
 lr_value:              1e-4
 lr_lambda:             0.01
+optimizer:             adamw_8bit  # saves ~8GB vs full-precision AdamW
 
 d1_values:             [0, 1, 2, 3, 4, 5]
 n_iterations:          80
+```
+
+**Memory budget per GPU (approximate):**
+```
+GPU 0 (training):
+  Model weights (bf16):         16.0 GB
+  Activations (grad checkpoint): 3.0 GB
+  LoRA gradients:                0.2 GB
+  8-bit AdamW states (LoRA):     0.4 GB
+  Value heads + optimizer:       0.1 GB
+  Misc / fragmentation:          1.5 GB
+  ─────────────────────────────────────
+  Total:                        ~21 GB   (19 GB headroom on 40 GB)
+
+GPU 1 (rollout + reference):
+  Model weights (bf16):         16.0 GB
+  KV cache (32 concurrent eps):  2.0 GB
+  Misc:                          1.0 GB
+  ─────────────────────────────────────
+  Total:                        ~19 GB   (21 GB headroom on 40 GB)
 ```
 
 ## Phase Schedule
@@ -229,7 +253,7 @@ Lagrangian advantage at Turn 2 ([ANSWER]):
                = 0.4 + 0.24 + 0.025
                = +0.665   → also reinforced (submitting correct code is good)
 
-After this batch, if avg_questions_across_512_episodes = 2.4 > d₁ = 2.0:
+After this batch, if avg_questions_across_256_episodes = 2.4 > d₁ = 2.0:
   λ₁ ← λ₁ + lr_λ × (2.4 - 2.0) = λ₁ + 0.01 × 0.4 = λ₁ + 0.004
   → questions become slightly more expensive next iteration
 ```
