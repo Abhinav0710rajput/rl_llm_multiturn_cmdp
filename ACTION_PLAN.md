@@ -95,3 +95,143 @@ rl_llm_multiturn_project/
 │   └── evaluate.py
 └── requirements.txt
 ```
+
+---
+
+## End-to-End Episode Example
+
+**Problem sampled from training pool:**
+```
+task_id:        HumanEval/42
+entry_point:    incr_list
+degradation:    1a (ambiguity — specific value removed)
+degraded_spec:  "Return list with elements incremented by a number."
+original_spec:  "Return list with elements incremented by 1."   ← agent never sees this
+test_suite:     assert incr_list([1,2,3]) == [2,3,4]
+                assert incr_list([]) == []
+                assert incr_list([-1,0,1]) == [0,1,2]
+budget d₁:      2  (agent may average at most 2 questions per problem)
+```
+
+---
+
+**Turn 1 — Agent input:**
+```
+System: You are a coding assistant. Given the task below, you can either:
+- Ask a clarifying question by responding with [ASK] followed by your question
+- Write your solution by responding with [ANSWER] followed by Python code
+
+Task:
+def incr_list(l: list):
+    """Return list with elements incremented by a number."""
+
+Conversation so far: (none)
+
+Your action:
+```
+
+**Turn 1 — Agent output:**
+```
+[ASK] What number should each element be incremented by?
+```
+
+**Turn 1 — User simulator receives:**
+```
+System: You hold the full specification: "Return list with elements incremented by 1."
+        Answer ONLY what is asked. Do not volunteer extra information.
+User:   What number should each element be incremented by?
+```
+
+**Turn 1 — User simulator responds:**
+```
+Each element should be incremented by 1.
+```
+
+**Turn 1 — Transition recorded:**
+```
+reward  = 0.0   (no code submitted yet)
+cost_q  = 1.0   (asked a question)
+cost_t  = 1.0   (used a turn)
+done    = False
+```
+
+---
+
+**Turn 2 — Agent input:**
+```
+System: (same system prompt)
+
+Task:
+def incr_list(l: list):
+    """Return list with elements incremented by a number."""
+
+Conversation so far:
+[Turn 1] You asked: "What number should each element be incremented by?"
+[Turn 1] User said: "Each element should be incremented by 1."
+
+Your action:
+```
+
+**Turn 2 — Agent output:**
+```
+[ANSWER]
+def incr_list(l: list):
+    return [x + 1 for x in l]
+```
+
+**Turn 2 — Code executor runs:**
+```python
+def incr_list(l: list):
+    return [x + 1 for x in l]
+
+assert incr_list([1, 2, 3]) == [2, 3, 4]   # PASS
+assert incr_list([]) == []                  # PASS
+assert incr_list([-1, 0, 1]) == [0, 1, 2]  # PASS
+```
+
+**Turn 2 — Transition recorded:**
+```
+reward  = 1.0   (3/3 tests passed → pass@1 = 1.0)
+cost_q  = 0.0   (no question asked)
+cost_t  = 1.0   (used a turn)
+done    = True
+```
+
+---
+
+**Episode Summary:**
+
+| Turn | Action | reward | cost_q | cost_t |
+|------|--------|--------|--------|--------|
+| 1    | [ASK]  | 0.0    | 1.0    | 1.0    |
+| 2    | [ANSWER] | 1.0  | 0.0    | 1.0    |
+| **Total** | | **1.0** | **1.0** | **2.0** |
+
+---
+
+**Reward & Constraint Formulation:**
+
+```
+Episode return (reward):     R = 1.0         (pass@1 from final code)
+Episode cost (questions):    C_q = 1.0       (1 question asked)
+Episode cost (turns):        C_t = 2.0       (2 turns used)
+
+Budget constraint:           E[C_q] ≤ d₁ = 2.0   (soft, enforced on batch average)
+
+Lagrangian advantage at Turn 1 ([ASK]):
+  A_lagrangian = A_reward - λ₁ · A_q_cost - λ₂ · A_t_cost
+               = (+0.6)   - (0.3) · (+0.8) - (0.05) · (+0.5)
+               = 0.6 - 0.24 - 0.025
+               = +0.335   → this action gets reinforced (positive advantage)
+
+Lagrangian advantage at Turn 2 ([ANSWER]):
+  A_lagrangian = (+0.4) - (0.3) · (-0.8) - (0.05) · (-0.5)
+               = 0.4 + 0.24 + 0.025
+               = +0.665   → also reinforced (submitting correct code is good)
+
+After this batch, if avg_questions_across_512_episodes = 2.4 > d₁ = 2.0:
+  λ₁ ← λ₁ + lr_λ × (2.4 - 2.0) = λ₁ + 0.01 × 0.4 = λ₁ + 0.004
+  → questions become slightly more expensive next iteration
+```
+
+The agent in this episode asked exactly the right question and got full reward. Under a tighter budget (e.g. `d₁=0`), `λ₁` would be large enough that the cost of asking outweighs the expected reward gain, so the policy would learn to guess directly instead.
