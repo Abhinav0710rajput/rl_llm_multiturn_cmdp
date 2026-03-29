@@ -13,4 +13,4 @@ source ~/.bashrc
 conda activate rl-clarify
 
 cd $HOME/rl_llm_multiturn_project
-python scripts/baseline_eval.py --n 30 --two-gpu --multi-turn
+python scripts/baseline_eval.py --n 10 --two-gpu --multi-turn
