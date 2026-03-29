@@ -10,7 +10,7 @@ from typing import List, Optional, Dict
 from datasets import load_dataset
 
 
-DEGRADATION_FIELDS = ["prompt1a", "prompt1c", "prompt1p", "prompt2ac", "prompt2ap", "prompt2cp"]
+DEGRADATION_FIELDS = ["prompt1a", "prompt1c", "prompt1p", "prompt2ac", "prompt2ap", "prompt2cp", "prompt3acp"]
 
 
 @dataclass
@@ -79,6 +79,7 @@ def load_humaneval_comm(
         "prompt2ac": "2ac",
         "prompt2ap": "2ap",
         "prompt2cp": "2cp",
+        "prompt3acp": "3acp",
     }
 
     train_problems: List[Problem] = []
