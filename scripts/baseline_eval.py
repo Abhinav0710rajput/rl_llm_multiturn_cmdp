@@ -133,26 +133,34 @@ Solution:
             "score": score,
         })
 
-        status = f"pass@1={score:.2f}" if action_type == "answer" else action_type
-        print(f"  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type}): {status}")
+        status = f"pass@1={score:.2f}" if action_type == "answer" else f"{action_type} (score={score:.2f})"
+        print(f"\n  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type}): {status}")
+        print(f"  Degraded spec:")
+        for line in p.degraded_prompt.strip().splitlines():
+            print(f"    {line}")
+        print(f"  Raw output:")
+        for line in action_text.strip().splitlines():
+            print(f"    {line}")
+        print(f"  Extracted code:")
+        for line in (code or "(none)").strip().splitlines():
+            print(f"    {line}")
 
     # Single-turn summary
     n_answer = sum(1 for r in single_results if r["action_type"] == "answer")
     n_ask = sum(1 for r in single_results if r["action_type"] == "ask")
     n_malformed = sum(1 for r in single_results if r["action_type"] == "malformed")
-    scores = [r["score"] for r in single_results if r["action_type"] == "answer"]
-    avg_score = sum(scores) / len(scores) if scores else 0.0
-    n_perfect = sum(1 for s in scores if s == 1.0)
-    n_partial = sum(1 for s in scores if 0.0 < s < 1.0)
+    all_scores = [r["score"] for r in single_results]
+    avg_score = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    n_perfect = sum(1 for s in all_scores if s == 1.0)
+    n_partial = sum(1 for s in all_scores if 0.0 < s < 1.0)
+    n_zero = sum(1 for s in all_scores if s == 0.0)
 
     print(f"\n  Single-turn summary:")
-    print(f"    Submitted code:  {n_answer}/{len(diverse_problems)}")
-    print(f"    Asked instead:   {n_ask}/{len(diverse_problems)}")
-    print(f"    Malformed:       {n_malformed}/{len(diverse_problems)}")
-    print(f"    Avg pass@1 (of submitted): {avg_score:.3f}")
-    print(f"    Perfect (1.0):   {n_perfect}/{n_answer}")
-    print(f"    Partial (0<x<1): {n_partial}/{n_answer}")
-    print(f"    Failed (0.0):    {n_answer - n_perfect - n_partial}/{n_answer}")
+    print(f"    Format: [ANSWER]={n_answer}, [ASK]={n_ask}, malformed={n_malformed}")
+    print(f"    Avg pass@1 (all, code extracted regardless of format): {avg_score:.3f}")
+    print(f"    Perfect (1.0):   {n_perfect}/{len(diverse_problems)}")
+    print(f"    Partial (0<x<1): {n_partial}/{len(diverse_problems)}")
+    print(f"    Failed (0.0):    {n_zero}/{len(diverse_problems)}")
 
     # ── Multi-turn eval (with simulator) ─────────────────────────────────
     if args.multi_turn:
