@@ -46,6 +46,7 @@ def main():
         cfg.model.train_device = "cuda:0"
         cfg.model.rollout_device = "cuda:0"
 
+
     import torch
     from src.data.dataset import load_humaneval_comm
     from src.models.agent import Agent

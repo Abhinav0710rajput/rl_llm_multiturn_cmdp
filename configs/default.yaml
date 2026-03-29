@@ -18,7 +18,7 @@ model:
 
 environment:
   max_turns: 6
-  max_new_tokens: 256
+  max_new_tokens: 512
   max_seq_len: 1536
   rollout_temperature: 0.8
   # "count"    → user simulator counts atomic questions; cost_q = N per turn
