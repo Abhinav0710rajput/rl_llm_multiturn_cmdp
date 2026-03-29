@@ -71,7 +71,7 @@ This gives ~762 total variants, but only 164 truly independent problems (variant
 
 **Component 3 — Code Executor (Python sandbox, NOT trained):** Runs the agent's generated code against the test suite. Returns pass@1 (fraction of tests that pass).
 
-**The Agent — Llama-3.2-3B-Instruct with LoRA adapters (THIS is what we train):** Takes in the degraded spec + conversation history, outputs either a clarifying question or code.
+**The Agent — Qwen2.5-Coder-7B-Instruct with LoRA adapters (THIS is what we train):** Takes in the degraded spec + conversation history, outputs either a clarifying question or code. Constrained prefix decoding ensures every output starts with `[ASK]` or `[ANSWER]`.
 
 ### 4.2 What One Episode Looks Like
 
@@ -236,11 +236,11 @@ One cycle of the training loop: collect 256 rollouts → compute advantages → 
 
 ## 6. The Model
 
-**Agent:** `meta-llama/Llama-3.2-3B-Instruct`
+**Agent:** `Qwen/Qwen2.5-Coder-7B-Instruct`
 
-We use the smallest feasible Llama instruction-tuned model. This keeps iteration fast (3x faster than 8B), fits on a single A100, and still generates decent Python code. We can scale to 8B for final results if time permits.
+We use a code-specialized 7B model. The HumanEvalComm paper shows code-specialized models (CodeQwen, DeepSeek Coder) score ~20% higher on degraded specs than general-purpose models. Qwen2.5-Coder-7B fits on 2× A100-40GB and provides a strong coding baseline for PPO to build on. (Originally planned as Llama-3.1-8B, switched after testing showed 0% baseline accuracy.)
 
-**Adaptation:** LoRA (rank 16) on attention layers. The base 3B weights are frozen. Only the small LoRA adapter matrices (~20-40M parameters) are updated by PPO.
+**Adaptation:** LoRA (rank 16) on attention + MLP layers. The base 7B weights are frozen. Only the small LoRA adapter matrices (~40M parameters) are updated by PPO. Prompts use Qwen's chat template (`<|im_start|>/<|im_end|>`).
 
 **Value heads:** Three small MLPs (separate from the LLM) that predict expected future reward, future question cost, and future turn cost from the current state. Used for computing advantages. Trained via regression alongside the policy.
 
@@ -293,7 +293,7 @@ Train one policy with these per-problem budgets. Compare against the best fixed-
 
 ### Weeks 5-7: Phase 1 — PPO-Lagrangian
 
-- Implement PPO with LoRA on Llama-3.2-3B-Instruct using TRL or OpenRLHF
+- Implement PPO with LoRA on Qwen2.5-Coder-7B-Instruct
 - Add three value heads, Lagrangian dual update
 - Train d₁ = 2 first (debug and tune hyperparameters)
 - Full Pareto sweep: d₁ ∈ {0, 1, 2, 3, 4, 5}
@@ -326,12 +326,11 @@ Train one policy with these per-problem budgets. Compare against the best fixed-
 
 ## 10. Compute Requirements
 
-- **Model:** Llama-3.2-3B-Instruct with LoRA (rank 16)
-- **Hardware:** 1× A100-80GB (or equivalent)
-- **Per d₁ setting:** ~80 iterations × ~10 min/iteration = ~13 hours
-- **Full Phase 1 sweep (6 settings):** ~80 hours
-- **Phase 3 (1 adaptive setting):** ~13 hours
-- **User simulator API cost:** ~$5-10 total (GPT-4o-mini is cheap)
+- **Model:** Qwen2.5-Coder-7B-Instruct with LoRA (rank 16)
+- **Hardware:** 2× A100-40GB (NYU Greene HPC)
+- **Per d₁ setting:** ~80 iterations × ~8 min/iteration = ~11 hours
+- **d₁=0 + d₁=1:** ~22 hours total
+- **User simulator API cost:** ~$3-4 total (GPT-4o-mini)
 - **Total estimate:** ~100 GPU-hours + ~$10 API costs
 
 ## 11. Key References

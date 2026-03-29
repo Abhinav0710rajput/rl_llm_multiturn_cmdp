@@ -2,11 +2,13 @@
 
 ## Overview
 
-We are building a reinforcement learning pipeline that trains an LLM agent (Llama-3.1-8B-Instruct with LoRA) to ask optimal clarifying questions when given ambiguous coding problems, under a budget constraint on how many questions it can ask. The environment is a multi-turn conversation loop: the agent sees a degraded problem spec, decides to either ask a clarifying question (`[ASK]`) or submit code (`[ANSWER]`), a GPT-4o-mini user simulator answers questions using the hidden full spec, and a sandboxed code executor scores the submitted code against a hidden test suite (pass@1). This interaction is formulated as a Constrained MDP with two cost signals — questions asked and turns used — and trained using PPO-Lagrangian, where a Lagrange multiplier automatically learns how much to penalize question-asking to satisfy the budget constraint `d₁`. By training six separate policies at `d₁ ∈ {0,1,2,3,4,5}`, we produce a Pareto frontier of policies ranging from "never ask" to "ask freely", each optimal for its budget — something SFT cannot provide.
+We are building a reinforcement learning pipeline that trains an LLM agent (**Qwen2.5-Coder-7B-Instruct** with LoRA) to ask optimal clarifying questions when given ambiguous coding problems, under a budget constraint on how many questions it can ask. The environment is a multi-turn conversation loop: the agent sees a degraded problem spec, decides to either ask a clarifying question (`[ASK]`) or submit code (`[ANSWER]`), a GPT-4o-mini user simulator answers questions using the hidden full spec, and a sandboxed code executor scores the submitted code against a hidden test suite (pass@1). This interaction is formulated as a Constrained MDP with two cost signals — questions asked and turns used — and trained using PPO-Lagrangian, where a Lagrange multiplier automatically learns how much to penalize question-asking to satisfy the budget constraint `d₁`. By training separate policies at `d₁ ∈ {0,1}`, we compare a "never ask" policy against one that may ask at most 1 question on average.
+
+**Model change (2026-03-29):** Switched from Llama-3.1-8B-Instruct to Qwen2.5-Coder-7B-Instruct based on HumanEvalComm paper results showing code-specialized models score ~20% higher on degraded specs. Llama 8B scored 0% on initial smoke tests; Qwen Coder provides a stronger coding baseline. Same LoRA config and memory budget apply.
 
 ## Hardware & Model
 
-We have 2× A100-40GB GPUs (80GB total). **Llama-3.1-8B-Instruct remains the right model choice** — its bf16 weights occupy 16GB, leaving ~24GB headroom per GPU for activations, KV cache, and optimizer states. GPU 0 handles PPO training (model weights + LoRA gradients + 8-bit AdamW optimizer + value heads + gradient checkpointing to cap activation memory at ~3GB). GPU 1 holds a frozen inference copy of the model for rollout collection and the reference policy for KL penalty — these share the same 16GB base weights, so only one full copy per GPU is needed. The tighter VRAM compared to 80GB cards means we reduce rollout batch size from 512 → 256, PPO mini-batch from 32 → 16, max sequence length from 2048 → 1536, and enable gradient checkpointing. Everything else stays the same. The agent uses LoRA rank=16 on all attention and MLP projection layers (~40M trainable params); three small MLP value heads predict expected future reward, question cost, and turn cost from the LLM's 4096-dim hidden state.
+We have 2× A100-40GB GPUs (80GB total). **Qwen2.5-Coder-7B-Instruct** — its bf16 weights occupy ~14GB, leaving ~26GB headroom per GPU for activations, KV cache, and optimizer states. GPU 0 handles PPO training (model weights + LoRA gradients + 8-bit AdamW optimizer + value heads + gradient checkpointing to cap activation memory at ~3GB). GPU 1 holds a frozen inference copy of the model for rollout collection and the reference policy for KL penalty. The agent uses LoRA rank=16 on all attention and MLP projection layers (~40M trainable params); three small MLP value heads predict expected future reward, question cost, and turn cost from the LLM's 3584-dim hidden state. Prompts use Qwen's chat template (`<|im_start|>/<|im_end|>`) via `tokenizer.apply_chat_template()`. Constrained prefix decoding forces every generation to start with `[ASK]` or `[ANSWER]`, preventing malformed outputs.
 
 ## Pipeline Components
 
@@ -15,7 +17,7 @@ We have 2× A100-40GB GPUs (80GB total). **Llama-3.1-8B-Instruct remains the rig
 | Problem Bank | JSON of (degraded_spec, original_spec, test_suite) tuples from HumanEvalComm + MBPP | No |
 | User Simulator | GPT-4o-mini API call; answers agent questions using original_spec only | No |
 | Code Executor | Runs agent code in a subprocess sandbox against test assertions; returns pass@1 | No |
-| Agent | Llama-3.1-8B + LoRA; generates `[ASK]`/`[ANSWER]` actions | **Yes** |
+| Agent | Qwen2.5-Coder-7B + LoRA; generates `[ASK]`/`[ANSWER]` actions (constrained prefix) | **Yes** |
 | Value Heads | 3 MLPs predicting V_reward, V_q_cost, V_t_cost from hidden state | **Yes** |
 
 ## Training Loop (one iteration)
@@ -30,7 +32,7 @@ We have 2× A100-40GB GPUs (80GB total). **Llama-3.1-8B-Instruct remains the rig
 
 ```yaml
 # Hardware: 2× A100-40GB
-model:           meta-llama/Llama-3.1-8B-Instruct   # 16GB bf16; fits on 40GB with room
+model:           Qwen/Qwen2.5-Coder-7B-Instruct     # ~14GB bf16; fits on 40GB with room
 lora_rank:       16
 lora_alpha:      32
 lora_targets:    [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
@@ -38,7 +40,7 @@ gradient_checkpointing: true    # keeps activation memory ~3GB instead of ~10GB
 
 rollout_batch_size:    256      # reduced from 512 (40GB vs 80GB)
 max_turns:             6
-max_new_tokens:        256      # reduced from 300 to save KV cache memory
+max_new_tokens:        512      # enough for longest solutions (~500 tokens)
 max_seq_len:           1536     # reduced from 2048; episodes rarely exceed this
 temperature:           0.8      # agent during rollout
 user_sim_temperature:  0.0      # GPT-4o-mini (deterministic environment)
@@ -105,7 +107,7 @@ rl_llm_multiturn_project/
 │   │   ├── user_simulator.py # GPT-4o-mini async wrapper
 │   │   └── code_executor.py  # subprocess sandbox + pass@1
 │   ├── models/
-│   │   ├── agent.py          # Llama-3.1-8B + LoRA + generation/scoring
+│   │   ├── agent.py          # Qwen2.5-Coder-7B + LoRA + generation/scoring
 │   │   └── value_heads.py    # 3 MLP value heads
 │   ├── training/
 │   │   ├── rollout.py        # RolloutBuffer + collect_rollouts()

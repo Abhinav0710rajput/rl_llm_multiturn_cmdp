@@ -1,6 +1,6 @@
 # Constrained Clarification: Training LLM Agents to Ask Better Questions Under Budget Constraints
 
-This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems — but under a strict budget on how many questions it can ask. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Llama-3.1-8B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
+This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems — but under a strict budget on how many questions it can ask. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
 ---
 
@@ -49,8 +49,8 @@ The training algorithm is **PPO-Lagrangian**, where a Lagrange multiplier `λ₁
 | Internet | Required (HuggingFace + OpenAI API) | — |
 
 **GPU layout:**
-- `cuda:0` — Policy training (Llama-3.1-8B + LoRA + value heads + optimizer, ~21 GB)
-- `cuda:1` — Rollout inference + frozen reference model (~19 GB)
+- `cuda:0` — Policy training (Qwen2.5-Coder-7B + LoRA + value heads + optimizer, ~19 GB)
+- `cuda:1` — Rollout inference + frozen reference model (~17 GB)
 
 To change GPU assignment, edit `model.train_device` and `model.rollout_device` in `configs/default.yaml`.
 
@@ -82,14 +82,10 @@ pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 python3 -c "import torch; print(torch.cuda.device_count(), 'GPUs available')"
 ```
 
-**Request Llama-3.1-8B access:**
-The base model requires a HuggingFace account with access approved at:
-https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
-
-Then log in:
+**Download the base model:**
+The base model (Qwen2.5-Coder-7B-Instruct) is openly available on HuggingFace — no access request or token needed:
 ```bash
-huggingface-cli login
-# Enter your HuggingFace token when prompted
+python -c "from transformers import AutoTokenizer, AutoModelForCausalLM; AutoTokenizer.from_pretrained('Qwen/Qwen2.5-Coder-7B-Instruct'); AutoModelForCausalLM.from_pretrained('Qwen/Qwen2.5-Coder-7B-Instruct', torch_dtype='bfloat16')"
 ```
 
 ---
@@ -118,16 +114,9 @@ source .env  # if using a .env file
 
 **Cost estimate:** GPT-4o-mini charges ~$0.15 per 1M input tokens. With 256 episodes/iteration × 80 iterations × ~2 questions/episode × ~200 tokens/call ≈ ~8M tokens ≈ **~$1.20 per d₁ setting**.
 
-### HuggingFace Token (required to download Llama-3.1-8B)
+### HuggingFace Token (not required)
 
-```bash
-export HF_TOKEN="hf_..."
-```
-
-Or log in via CLI:
-```bash
-huggingface-cli login
-```
+Qwen2.5-Coder-7B-Instruct is not gated — no HuggingFace token is needed to download it.
 
 ---
 
@@ -154,7 +143,7 @@ rl_llm_multiturn_project/
 │   │   └── code_executor.py  # Sandboxed Python runner → pass@1 reward
 │   │
 │   ├── models/
-│   │   ├── agent.py          # Llama-3.1-8B + LoRA: generate() and score()
+│   │   ├── agent.py          # Qwen2.5-Coder-7B + LoRA: generate() and score()
 │   │   └── value_heads.py    # Three MLP value heads (reward, q_cost, t_cost)
 │   │
 │   ├── training/
@@ -168,7 +157,12 @@ rl_llm_multiturn_project/
 │
 ├── scripts/
 │   ├── train.py              # Training entry point
-│   └── evaluate.py           # Evaluation entry point
+│   ├── evaluate.py           # Evaluation entry point
+│   ├── smoke_test.py         # End-to-end pipeline validation
+│   ├── baseline_eval.py      # Base model coding ability test
+│   ├── smoke_test.sbatch     # SLURM job script for smoke test
+│   ├── baseline_eval.sbatch  # SLURM job script for baseline eval
+│   └── train_sanity.sbatch   # SLURM job script for short training check
 │
 ├── checkpoints/              # Saved model checkpoints (gitignored)
 │   ├── d1_0/
@@ -223,7 +217,7 @@ There are two system prompts in this project. Both are defined in source code, n
 
 ### Agent System Prompt
 
-Located in `src/environment/env.py` — this is what the agent (Llama-3.1-8B) sees at every turn:
+Located in `src/environment/env.py` — this is what the agent sees at every turn. Prompts are formatted using the model's chat template (`<|im_start|>/<|im_end|>` for Qwen):
 
 ```
 You are a coding assistant. Given a coding task below, you must either:
@@ -416,7 +410,7 @@ checkpoints/
 | `train_state.pt` | Optimizer and LR scheduler state (for resuming) | ~500 MB |
 | `log.json` | Per-iteration training metrics | ~100 KB |
 
-**Note:** The base Llama-3.1-8B weights (~16 GB) are NOT saved — they are downloaded from HuggingFace and remain frozen. Only the LoRA adapter (~80 MB) is saved. To deploy a checkpoint, you need both the base model and the LoRA adapter.
+**Note:** The base Qwen2.5-Coder-7B weights (~14 GB) are NOT saved — they are downloaded from HuggingFace and remain frozen. Only the LoRA adapter (~80 MB) is saved. To deploy a checkpoint, you need both the base model and the LoRA adapter.
 
 ### Loading a Checkpoint for Inference
 
@@ -443,7 +437,7 @@ All configuration lives in `configs/default.yaml`. Every value can be overridden
 
 ```yaml
 model:
-  name: meta-llama/Llama-3.1-8B-Instruct   # HuggingFace model ID
+  name: Qwen/Qwen2.5-Coder-7B-Instruct      # HuggingFace model ID
   dtype: bfloat16                            # bf16 for A100s
   lora_rank: 16                              # LoRA rank (~40M trainable params)
   lora_alpha: 32                             # LoRA scaling factor
@@ -466,7 +460,7 @@ model:
 ```yaml
 environment:
   max_turns: 6                               # Hard cap on conversation length
-  max_new_tokens: 256                        # Max tokens per agent action
+  max_new_tokens: 512                        # Max tokens per agent action
   max_seq_len: 1536                          # Max total prompt length (tokens)
   rollout_temperature: 0.8                   # Exploration temperature during rollout
   multi_question_mode: count                 # "count" or "truncate" (see Section 7)
@@ -535,11 +529,14 @@ data:
 
 ## 12. Key Design Decisions
 
-**Why Llama-3.1-8B and not 3B?**
-The original paper uses 3B to fit on a single A100-40GB. With 2× A100-40GB, 8B fits comfortably (~21 GB on GPU 0) and produces meaningfully better code generation.
+**Why Qwen2.5-Coder-7B and not Llama-3.1-8B?**
+The HumanEvalComm paper shows that code-specialized models (CodeQwen, DeepSeek Coder) significantly outperform general-purpose models on degraded specs. Qwen2.5-Coder-7B scores ~70% on standard HumanEval vs ~55% for Llama-3.1-8B. It's also similar size (~14GB bf16), same LoRA config, and not gated on HuggingFace. We verified that Llama-3.1-8B scored 0% on smoke test episodes; Qwen Coder provides a much stronger coding baseline for PPO to build on.
 
 **Why LoRA and not full fine-tuning?**
-Full fine-tuning on 8B with AdamW would require ~64 GB for optimizer states alone. LoRA limits trainable parameters to ~40M, reducing optimizer memory to ~800 MB. The frozen base weights also prevent catastrophic forgetting of Python syntax knowledge.
+Full fine-tuning on 7B with AdamW would require ~56 GB for optimizer states alone. LoRA limits trainable parameters to ~40M, reducing optimizer memory to ~800 MB. The frozen base weights also prevent catastrophic forgetting of Python syntax knowledge.
+
+**Why constrained prefix decoding?**
+The base model sometimes outputs code without the required `[ASK]` or `[ANSWER]` prefix, resulting in malformed actions and zero reward. Constrained prefix decoding forces every generation to start with one of the two valid prefixes. The model still chooses which prefix by comparing their log-probs given the prompt — so the decision is learned, not random. This eliminates wasted training iterations on formatting errors.
 
 **Why PPO-Lagrangian and not fixed-penalty RL?**
 A fixed penalty requires hand-tuning — you don't know in advance how large the penalty needs to be to achieve exactly d₁=1 question on average. PPO-Lagrangian finds this value automatically via dual ascent: if the agent asks too many questions, λ₁ rises until it stops; if it asks too few, λ₁ falls. This also enables sweeping multiple d₁ values without re-tuning.
