@@ -93,9 +93,19 @@ def main():
     print("SINGLE-TURN EVAL (agent submits code immediately)")
     print("=" * 60)
 
+    _DIRECT_PROMPT = """\
+You are a coding assistant. Write a Python solution for the task below.
+Respond with ONLY the Python code. No explanations, no questions.
+
+Task:
+{degraded_prompt}
+
+Solution:
+"""
+
     single_results = []
     for i, p in enumerate(diverse_problems):
-        prompt = _build_prompt(p, conversation=[])
+        prompt = _DIRECT_PROMPT.format(degraded_prompt=p.degraded_prompt)
         action_text, _, _, _ = agent.generate(prompt)
 
         upper = action_text.strip().upper()
