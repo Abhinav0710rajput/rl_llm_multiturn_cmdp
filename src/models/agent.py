@@ -110,17 +110,16 @@ class Agent:
         self._rollout_model.eval()
 
     @torch.no_grad()
-    def generate(self, prompt: str) -> Tuple[str, List[int], float, torch.Tensor]:
+    def generate(
+        self, prompt: str, constrain_prefix: bool = True,
+    ) -> Tuple[str, List[int], float, torch.Tensor]:
         """
         Generate one action during rollout (runs on GPU 1).
 
-        Uses constrained decoding: the model first scores both [ASK] and [ANSWER]
-        prefixes, samples one based on their relative log-probs, then generates
-        freely after the chosen prefix. This guarantees every output starts with
-        a valid action prefix.
-
         Args:
-            prompt: full text prompt string
+            prompt:            full text prompt string
+            constrain_prefix:  if True, force output to start with [ASK] or [ANSWER].
+                               Set False for non-env prompts (e.g. direct code generation).
 
         Returns:
             action_text:  raw generated text (e.g. "[ASK] What is X?")
@@ -143,7 +142,7 @@ class Agent:
 
         prompt_len = enc.input_ids.shape[1]
 
-        # Forward pass on prompt to get hidden state + KV cache
+        # Forward pass on prompt to get hidden state
         with torch.no_grad():
             outputs = model(
                 **enc,
@@ -151,15 +150,35 @@ class Agent:
                 use_cache=True,
             )
         last_hidden = outputs.hidden_states[-1][0, -1, :].cpu().float()
-        past = outputs.past_key_values
+
+        if not constrain_prefix:
+            # ── Unconstrained generation (e.g. direct code prompt) ────────
+            gen_out = model.generate(
+                **enc,
+                max_new_tokens=self.max_new_tokens,
+                do_sample=True,
+                temperature=self.rollout_temperature,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                return_dict_in_generate=True,
+                output_scores=True,
+            )
+            action_ids = gen_out.sequences[0, prompt_len:].tolist()
+            action_text = self.tokenizer.decode(action_ids, skip_special_tokens=True).strip()
+            action_logp = _compute_action_logp(gen_out.scores, action_ids)
+            return action_text, action_ids, action_logp, last_hidden
 
         # ── Constrained prefix selection ─────────────────────────────────
-        # Score both [ASK] and [ANSWER] prefixes autoregressively,
-        # then sample which prefix to use based on their total log-probs.
-        # Deep-copy the cache so scoring [ASK] doesn't pollute the cache for [ANSWER].
-        import copy
-        ask_logp = _score_prefix(model, copy.deepcopy(past), self._ask_ids, device)
-        ans_logp = _score_prefix(model, copy.deepcopy(past), self._answer_ids, device)
+        # Use the prompt's last-position logits to score the first token of
+        # each prefix, then continue autoregressively for remaining tokens.
+        prompt_logits = outputs.logits[0, -1, :]  # logits predicting first token after prompt
+
+        ask_logp = _score_prefix_from_logits(
+            model, prompt_logits, outputs.past_key_values, self._ask_ids, device
+        )
+        ans_logp = _score_prefix_from_logits(
+            model, prompt_logits, outputs.past_key_values, self._answer_ids, device
+        )
 
         # Sample prefix proportional to exp(logp) (i.e., softmax over the two)
         logps = torch.tensor([ask_logp, ans_logp])
@@ -276,24 +295,40 @@ class Agent:
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
-def _score_prefix(
-    model, past_key_values, prefix_ids: List[int], device: torch.device
+def _score_prefix_from_logits(
+    model,
+    prompt_logits: torch.Tensor,
+    past_key_values,
+    prefix_ids: List[int],
+    device: torch.device,
 ) -> float:
     """
-    Score a fixed prefix autoregressively using cached KV from the prompt.
-    Returns the sum of log-probs for the prefix tokens.
+    Score a fixed prefix using the prompt's logits for the first token,
+    then autoregressively for subsequent tokens.
+
+    No KV cache mutation — we re-encode the prefix cheaply (only a few tokens).
     """
     total_logp = 0.0
-    past = past_key_values
 
-    for tok_id in prefix_ids:
-        inp = torch.tensor([[tok_id]], device=device)
+    # Score first prefix token using the prompt's last logits
+    log_probs = F.log_softmax(prompt_logits, dim=-1)
+    total_logp += log_probs[prefix_ids[0]].item()
+
+    if len(prefix_ids) == 1:
+        return total_logp
+
+    # Score remaining prefix tokens by feeding them through the model
+    # Re-encode prompt + prefix[:i] to avoid cache mutation issues
+    # Since prefixes are short (3-5 tokens), this is cheap
+    prefix_tensor = torch.tensor([prefix_ids], device=device)
+    for i in range(1, len(prefix_ids)):
+        # Feed tokens up to position i, get logits predicting position i
+        inp = prefix_tensor[:, :i]
         with torch.no_grad():
-            out = model(input_ids=inp, past_key_values=past, use_cache=True)
+            out = model(input_ids=inp, past_key_values=past_key_values, use_cache=False)
         logits = out.logits[0, -1, :]
         log_probs = F.log_softmax(logits, dim=-1)
-        total_logp += log_probs[tok_id].item()
-        past = out.past_key_values
+        total_logp += log_probs[prefix_ids[i]].item()
 
     return total_logp
 

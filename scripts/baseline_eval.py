@@ -106,7 +106,7 @@ Solution:
     single_results = []
     for i, p in enumerate(diverse_problems):
         prompt = _DIRECT_PROMPT.format(degraded_prompt=p.degraded_prompt)
-        action_text, _, _, _ = agent.generate(prompt)
+        action_text, _, _, _ = agent.generate(prompt, constrain_prefix=False)
 
         upper = action_text.strip().upper()
         if upper.startswith("[ANSWER]"):
