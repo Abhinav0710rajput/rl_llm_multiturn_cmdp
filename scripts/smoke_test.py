@@ -222,7 +222,16 @@ def test_generation(agent, problems):
     for i, p in enumerate(problems[:3]):
         prompt = _build_prompt(p, conversation=[])
         print(f"\n  --- Episode {i+1}: {p.task_id} ({p.degradation_type}) ---")
-        print(f"  Prompt length: {len(prompt)} chars")
+        print(f"\n  Original spec (hidden from agent):")
+        for line in p.original_prompt.strip().splitlines():
+            print(f"    {line}")
+        print(f"\n  Degraded spec (what the agent sees):")
+        for line in p.degraded_prompt.strip().splitlines():
+            print(f"    {line}")
+        print(f"\n  Full prompt sent to model:")
+        for line in prompt.strip().splitlines():
+            print(f"    {line}")
+        print(f"\n  Prompt length: {len(prompt)} chars")
 
         t0 = time.time()
         action_text, action_ids, action_logp, hidden = agent.generate(prompt)
