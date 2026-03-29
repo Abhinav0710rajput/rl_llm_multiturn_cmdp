@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=smoke-test
-#SBATCH --partition=c12m85-a100-1
+#SBATCH --partition=c24m170-a100-2
 #SBATCH --account=ds_ga_1012-2026sp
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:a100:2
