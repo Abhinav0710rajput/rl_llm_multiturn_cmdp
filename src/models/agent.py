@@ -1,5 +1,5 @@
 """
-Agent: Llama-3.1-8B-Instruct with LoRA adapters.
+Agent: LLM with LoRA adapters for the clarification task.
 
 Responsibilities:
   generate()  → sample an action during rollout (returns text + log_prob + hidden_state)
@@ -71,6 +71,13 @@ class Agent:
         # Updated via sync_rollout_model() before each rollout batch.
         self._rollout_model = None
 
+        # ── Prefix token IDs for constrained decoding ────────────────────────
+        # Force every generation to start with either [ASK] or [ANSWER].
+        # The model chooses which prefix by comparing their log-probs given the
+        # prompt, then generates freely after the prefix.
+        self._ask_ids = self.tokenizer.encode("[ASK] ", add_special_tokens=False)
+        self._answer_ids = self.tokenizer.encode("[ANSWER] ", add_special_tokens=False)
+
     def sync_rollout_model(self):
         """
         Copy current LoRA weights to GPU 1 for rollout inference.
@@ -107,6 +114,11 @@ class Agent:
         """
         Generate one action during rollout (runs on GPU 1).
 
+        Uses constrained decoding: the model first scores both [ASK] and [ANSWER]
+        prefixes, samples one based on their relative log-probs, then generates
+        freely after the chosen prefix. This guarantees every output starts with
+        a valid action prefix.
+
         Args:
             prompt: full text prompt string
 
@@ -119,6 +131,7 @@ class Agent:
         """
         model = self._rollout_model or self.policy
         model.eval()
+        device = self.rollout_device if self._rollout_model else self.train_device
 
         enc = self.tokenizer(
             prompt,
@@ -126,25 +139,47 @@ class Agent:
             max_length=self.max_seq_len,
             truncation=True,
             padding=False,
-        ).to(self.rollout_device if self._rollout_model else self.train_device)
+        ).to(device)
 
         prompt_len = enc.input_ids.shape[1]
 
-        # Forward pass on prompt to get hidden state of last prompt token
+        # Forward pass on prompt to get hidden state + KV cache
         with torch.no_grad():
             outputs = model(
                 **enc,
                 output_hidden_states=True,
                 use_cache=True,
             )
-        # Last layer hidden state at the last prompt position
-        last_hidden = outputs.hidden_states[-1][0, -1, :].cpu().float()  # (hidden_dim,)
-        past_key_values = outputs.past_key_values
+        last_hidden = outputs.hidden_states[-1][0, -1, :].cpu().float()
+        past = outputs.past_key_values
 
-        # Generate action tokens
+        # ── Constrained prefix selection ─────────────────────────────────
+        # Score both [ASK] and [ANSWER] prefixes autoregressively,
+        # then sample which prefix to use based on their total log-probs.
+        ask_logp = _score_prefix(model, past, self._ask_ids, device)
+        ans_logp = _score_prefix(model, past, self._answer_ids, device)
+
+        # Sample prefix proportional to exp(logp) (i.e., softmax over the two)
+        logps = torch.tensor([ask_logp, ans_logp])
+        probs = torch.softmax(logps / self.rollout_temperature, dim=0)
+        choice = torch.multinomial(probs, 1).item()
+
+        if choice == 0:
+            prefix_ids = self._ask_ids
+            prefix_logp = ask_logp
+        else:
+            prefix_ids = self._answer_ids
+            prefix_logp = ans_logp
+
+        # ── Generate continuation after the prefix ───────────────────────
+        prefix_tensor = torch.tensor([prefix_ids], device=device)
+        full_input = torch.cat([enc.input_ids, prefix_tensor], dim=1)
+        full_mask = torch.ones_like(full_input)
+
         gen_out = model.generate(
-            **enc,
-            max_new_tokens=self.max_new_tokens,
+            input_ids=full_input,
+            attention_mask=full_mask,
+            max_new_tokens=self.max_new_tokens - len(prefix_ids),
             do_sample=True,
             temperature=self.rollout_temperature,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -153,11 +188,14 @@ class Agent:
             output_scores=True,
         )
 
-        action_ids = gen_out.sequences[0, prompt_len:].tolist()
+        # Combine prefix + generated continuation
+        continuation_ids = gen_out.sequences[0, prompt_len + len(prefix_ids):].tolist()
+        action_ids = prefix_ids + continuation_ids
         action_text = self.tokenizer.decode(action_ids, skip_special_tokens=True).strip()
 
-        # Compute sum of log-probs for the action tokens
-        action_logp = _compute_action_logp(gen_out.scores, action_ids)
+        # Total log-prob = prefix log-prob + continuation log-prob
+        continuation_logp = _compute_action_logp(gen_out.scores, continuation_ids)
+        action_logp = prefix_logp + continuation_logp
 
         return action_text, action_ids, action_logp, last_hidden
 
@@ -235,6 +273,28 @@ class Agent:
 
 
 # ── Helper functions ──────────────────────────────────────────────────────────
+
+def _score_prefix(
+    model, past_key_values, prefix_ids: List[int], device: torch.device
+) -> float:
+    """
+    Score a fixed prefix autoregressively using cached KV from the prompt.
+    Returns the sum of log-probs for the prefix tokens.
+    """
+    total_logp = 0.0
+    past = past_key_values
+
+    for tok_id in prefix_ids:
+        inp = torch.tensor([[tok_id]], device=device)
+        with torch.no_grad():
+            out = model(input_ids=inp, past_key_values=past, use_cache=True)
+        logits = out.logits[0, -1, :]
+        log_probs = F.log_softmax(logits, dim=-1)
+        total_logp += log_probs[tok_id].item()
+        past = out.past_key_values
+
+    return total_logp
+
 
 def _compute_action_logp(scores, action_ids: List[int]) -> float:
     """
