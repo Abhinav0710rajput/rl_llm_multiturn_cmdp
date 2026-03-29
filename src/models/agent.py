@@ -160,7 +160,6 @@ class Agent:
                 do_sample=True,
                 temperature=self.rollout_temperature,
                 pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
                 return_dict_in_generate=True,
                 output_scores=True,
             )
@@ -174,15 +173,17 @@ class Agent:
         # each prefix, then continue autoregressively for remaining tokens.
         prompt_logits = outputs.logits[0, -1, :]  # logits predicting first token after prompt
 
-        ask_logp = _score_prefix_from_logits(
-            model, prompt_logits, outputs.past_key_values, self._ask_ids, device
+        ask_logp = _score_prefix(
+            model, enc.input_ids, prompt_logits, self._ask_ids, device
         )
-        ans_logp = _score_prefix_from_logits(
-            model, prompt_logits, outputs.past_key_values, self._answer_ids, device
+        ans_logp = _score_prefix(
+            model, enc.input_ids, prompt_logits, self._answer_ids, device
         )
 
-        # Sample prefix proportional to exp(logp) (i.e., softmax over the two)
-        logps = torch.tensor([ask_logp, ans_logp])
+        # Sample prefix proportional to exp(avg logp) — normalize by length
+        # to avoid systematically favoring the shorter prefix
+        logps = torch.tensor([ask_logp / len(self._ask_ids),
+                              ans_logp / len(self._answer_ids)])
         probs = torch.softmax(logps / self.rollout_temperature, dim=0)
         choice = torch.multinomial(probs, 1).item()
 
@@ -205,7 +206,6 @@ class Agent:
             do_sample=True,
             temperature=self.rollout_temperature,
             pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
             return_dict_in_generate=True,
             output_scores=True,
         )
@@ -297,18 +297,18 @@ class Agent:
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
-def _score_prefix_from_logits(
+def _score_prefix(
     model,
+    prompt_ids: torch.Tensor,
     prompt_logits: torch.Tensor,
-    past_key_values,
     prefix_ids: List[int],
     device: torch.device,
 ) -> float:
     """
-    Score a fixed prefix using the prompt's logits for the first token,
-    then autoregressively for subsequent tokens.
+    Score a fixed prefix given the prompt.
 
-    No KV cache mutation — we re-encode the prefix cheaply (only a few tokens).
+    Uses the prompt's last-position logits for the first prefix token,
+    then does a single forward pass of prompt + prefix to score the rest.
     """
     total_logp = 0.0
 
@@ -319,18 +319,18 @@ def _score_prefix_from_logits(
     if len(prefix_ids) == 1:
         return total_logp
 
-    # Score remaining prefix tokens by feeding them through the model
-    # Re-encode prompt + prefix[:i] to avoid cache mutation issues
-    # Since prefixes are short (3-5 tokens), this is cheap
+    # Score remaining prefix tokens with a clean forward pass
+    # (prompt + prefix so far) — no KV cache reuse to avoid misalignment
     prefix_tensor = torch.tensor([prefix_ids], device=device)
+    full_input = torch.cat([prompt_ids, prefix_tensor], dim=1)
+    with torch.no_grad():
+        out = model(input_ids=full_input, use_cache=False)
+    # out.logits[:, prompt_len-1+i, :] predicts prefix token i
+    prompt_len = prompt_ids.shape[1]
     for i in range(1, len(prefix_ids)):
-        # Feed tokens up to position i, get logits predicting position i
-        inp = prefix_tensor[:, :i]
-        with torch.no_grad():
-            out = model(input_ids=inp, past_key_values=past_key_values, use_cache=False)
-        logits = out.logits[0, -1, :]
-        log_probs = F.log_softmax(logits, dim=-1)
-        total_logp += log_probs[prefix_ids[i]].item()
+        logits = out.logits[0, prompt_len - 1 + i, :]
+        lp = F.log_softmax(logits, dim=-1)
+        total_logp += lp[prefix_ids[i]].item()
 
     return total_logp
 
