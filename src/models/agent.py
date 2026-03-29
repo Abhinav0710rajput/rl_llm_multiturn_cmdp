@@ -138,6 +138,7 @@ class Agent:
             max_length=self.max_seq_len,
             truncation=True,
             padding=False,
+            add_special_tokens=False,  # chat template already includes special tokens
         ).to(device)
 
         prompt_len = enc.input_ids.shape[1]
@@ -246,6 +247,7 @@ class Agent:
             max_length=self.max_seq_len,
             truncation=True,
             padding=False,
+            add_special_tokens=False,  # chat template already includes special tokens
         ).to(self.train_device)
 
         prompt_ids = enc_prompt.input_ids  # (1, prompt_len)

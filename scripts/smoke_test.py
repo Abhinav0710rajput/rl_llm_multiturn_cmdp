@@ -220,7 +220,7 @@ def test_generation(agent, problems):
     agent.sync_rollout_model()
 
     for i, p in enumerate(problems[:3]):
-        prompt = _build_prompt(p, conversation=[])
+        prompt = _build_prompt(p, conversation=[], tokenizer=agent.tokenizer)
         print(f"\n  --- Episode {i+1}: {p.task_id} ({p.degradation_type}) ---")
         print(f"\n  Original spec (hidden from agent):")
         for line in p.original_prompt.strip().splitlines():
@@ -272,7 +272,7 @@ async def test_full_episode(agent, problems, cfg):
 
     from src.environment.env import ClarificationEnv
 
-    env = ClarificationEnv(cfg)
+    env = ClarificationEnv(cfg, tokenizer=agent.tokenizer)
 
     for i, p in enumerate(problems[:3]):
         print(f"\n  --- Episode {i+1}: {p.task_id} ({p.degradation_type}) ---")

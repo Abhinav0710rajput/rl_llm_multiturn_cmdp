@@ -93,19 +93,23 @@ def main():
     print("SINGLE-TURN EVAL (agent submits code immediately)")
     print("=" * 60)
 
-    _DIRECT_PROMPT = """\
-You are a coding assistant. Write a Python solution for the task below.
-Respond with ONLY the Python code. No explanations, no questions.
+    _DIRECT_SYSTEM = (
+        "You are a coding assistant. Write a Python solution for the task below. "
+        "Respond with ONLY the Python code. No explanations, no questions."
+    )
 
-Task:
-{degraded_prompt}
-
-Solution:
-"""
+    def _build_direct_prompt(degraded_prompt, tokenizer):
+        messages = [
+            {"role": "system", "content": _DIRECT_SYSTEM},
+            {"role": "user", "content": f"Task:\n{degraded_prompt}"},
+        ]
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
 
     single_results = []
     for i, p in enumerate(diverse_problems):
-        prompt = _DIRECT_PROMPT.format(degraded_prompt=p.degraded_prompt)
+        prompt = _build_direct_prompt(p.degraded_prompt, agent.tokenizer)
         action_text, _, _, _ = agent.generate(prompt, constrain_prefix=False)
 
         upper = action_text.strip().upper()
@@ -172,7 +176,7 @@ Solution:
             print("MULTI-TURN EVAL (agent can ask questions)")
             print("=" * 60)
 
-            env = ClarificationEnv(cfg)
+            env = ClarificationEnv(cfg, tokenizer=agent.tokenizer)
             multi_results = []
 
             for i, p in enumerate(diverse_problems):

@@ -68,7 +68,7 @@ def eval_one(cfg, checkpoint_dir: str, eval_problems, d1: int = None) -> dict:
             torch.load(vh_path, map_location=cfg.model.train_device)
         )
 
-    env = ClarificationEnv(cfg)
+    env = ClarificationEnv(cfg, tokenizer=agent.tokenizer)
     rng = random.Random(cfg.data.seed)
 
     results = asyncio.run(

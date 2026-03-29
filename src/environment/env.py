@@ -5,7 +5,8 @@ One episode = one problem. The agent receives the degraded spec and either:
   [ASK]    followed by a clarifying question  → user simulator answers
   [ANSWER] followed by Python code             → code executor scores
 
-State is represented as the full conversation string (re-built each turn).
+Prompts are built using the model's chat template (e.g. Qwen's <|im_start|>
+format) so that instruction-tuned models reliably follow instructions.
 The environment is stateless across episodes; each episode is independent.
 """
 
@@ -28,37 +29,34 @@ You are a coding assistant. Given a coding task below, you must either:
 Important rules:
   - Respond with ONLY one action per turn ([ASK] or [ANSWER]).
   - When you have enough information, write the code.
-  - Do not explain your reasoning — just output the action directly.
-"""
+  - Do not explain your reasoning — just output the action directly."""
 
 
-def _build_prompt(problem: Problem, conversation: List[Tuple[str, str]]) -> str:
+def _build_prompt(problem: Problem, conversation: List[Tuple[str, str]], tokenizer) -> str:
     """
-    Build the full text prompt for the agent at the current turn.
+    Build the full text prompt for the agent at the current turn,
+    using the model's chat template for proper instruction following.
 
     Args:
         problem:      the current problem
         conversation: list of (question, answer) pairs from previous turns
+        tokenizer:    HuggingFace tokenizer with a chat template
 
     Returns:
-        Full prompt string to tokenize and feed to the agent.
+        Formatted prompt string (with chat template special tokens).
     """
-    lines = [
-        _SYSTEM_PROMPT,
-        "Task:",
-        problem.degraded_prompt,
-        "",
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": f"Task:\n{problem.degraded_prompt}"},
     ]
 
-    if conversation:
-        lines.append("Conversation so far:")
-        for i, (q, a) in enumerate(conversation, start=1):
-            lines.append(f"[Turn {i}] You asked: \"{q}\"")
-            lines.append(f"[Turn {i}] User said: \"{a}\"")
-        lines.append("")
+    for question, answer in conversation:
+        messages.append({"role": "assistant", "content": f"[ASK] {question}"})
+        messages.append({"role": "user", "content": answer})
 
-    lines.append("Your action:")
-    return "\n".join(lines)
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True,
+    )
 
 
 # ── State & step result ───────────────────────────────────────────────────────
@@ -93,14 +91,16 @@ class StepResult:
 # ── Environment ───────────────────────────────────────────────────────────────
 
 class ClarificationEnv:
-    def __init__(self, cfg):
+    def __init__(self, cfg, tokenizer):
+        self.cfg = cfg
         self.max_turns = cfg.environment.max_turns
+        self.tokenizer = tokenizer
         self.simulator = UserSimulator(cfg)
         self.executor = CodeExecutor(cfg)
 
     def reset(self, problem: Problem) -> EnvState:
         """Start a new episode with the given problem."""
-        prompt = _build_prompt(problem, conversation=[])
+        prompt = _build_prompt(problem, conversation=[], tokenizer=self.tokenizer)
         return EnvState(
             problem=problem,
             conversation=[],
@@ -138,7 +138,7 @@ class ClarificationEnv:
             new_question_count = state.question_count + atomic_count
             done = turn_count >= self.max_turns
 
-            next_prompt = _build_prompt(state.problem, new_conversation)
+            next_prompt = _build_prompt(state.problem, new_conversation, self.tokenizer)
             next_state = EnvState(
                 problem=state.problem,
                 conversation=new_conversation,

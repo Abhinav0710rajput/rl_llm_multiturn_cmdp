@@ -87,7 +87,7 @@ class PPOLagrangianTrainer:
         self.dual = DualVariables(cfg)
 
         # ── Environment ───────────────────────────────────────────────────────
-        self.env = ClarificationEnv(cfg)
+        self.env = ClarificationEnv(cfg, tokenizer=self.agent.tokenizer)
 
         # ── State ─────────────────────────────────────────────────────────────
         self.iteration = 0
