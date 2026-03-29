@@ -75,6 +75,8 @@ data:
     - prompt1c
     - prompt1p
     - prompt2ac
+    - prompt2ap
+    - prompt2cp
 
 paths:
   data_dir: data/processed
