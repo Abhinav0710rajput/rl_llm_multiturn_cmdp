@@ -184,13 +184,29 @@ def main():
                 total_q = 0
                 total_t = 0
 
+                print(f"\n  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type})")
+                print(f"  Degraded spec:")
+                for line in p.degraded_prompt.strip().splitlines():
+                    print(f"    {line}")
+
                 for turn in range(cfg.environment.max_turns):
                     action_text, _, _, _ = agent.generate(state.prompt)
                     result = asyncio.run(env.step(state, action_text))
                     total_q += result.cost_q
                     total_t += result.cost_t
-                    state = result.next_state
 
+                    action_type = result.info.get("action_type", "?")
+                    print(f"  Turn {turn+1}:")
+                    print(f"    Action: {action_text}")
+                    if action_type == "ask":
+                        print(f"    Simulator answer: {result.info['answer']}")
+                        print(f"    Atomic questions: {result.info['atomic_count']}")
+                    elif action_type == "answer":
+                        print(f"    pass@1: {result.info['pass_rate']:.2f}")
+                    elif action_type == "malformed":
+                        print(f"    [MALFORMED OUTPUT]")
+
+                    state = result.next_state
                     if result.done:
                         break
 
@@ -203,8 +219,7 @@ def main():
                     "turns": total_t,
                 })
 
-                print(f"  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type}): "
-                      f"pass@1={score:.2f}, q={total_q:.0f}, t={total_t:.0f}")
+                print(f"  Summary: pass@1={score:.2f}, questions={total_q:.0f}, turns={total_t:.0f}")
 
             # Multi-turn summary
             m_scores = [r["score"] for r in multi_results]
