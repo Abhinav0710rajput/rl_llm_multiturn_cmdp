@@ -63,13 +63,54 @@ def load_humaneval_comm(
 
     ds = load_dataset("jie-jw-wu/HumanEvalComm", split="train")
     rows = list(ds)
-
-    # Split on base problem level
-    base_ids = [r["name"] for r in rows]
     rng = random.Random(seed)
-    rng.shuffle(base_ids)
-    eval_base_ids = set(base_ids[:eval_size])
-    train_base_ids = set(base_ids[eval_size:])
+
+    # ── Stratified split on base problem level ───────────────────────────
+    # Group base problems by their rarest available variant so that all 7
+    # degradation types are guaranteed to appear in both train and eval.
+
+    # 1. For each base problem, find which requested variants it has
+    base_to_variants = {}
+    for row in rows:
+        base_id = row["name"]
+        available = set()
+        for field_name in use_variants:
+            if _is_valid(row.get(field_name)):
+                available.add(field_name)
+        base_to_variants[base_id] = available
+
+    # 2. Define rarity order (rarest first)
+    rarity_order = ["prompt3acp", "prompt2cp", "prompt2ap", "prompt2ac",
+                     "prompt1p", "prompt1c", "prompt1a"]
+
+    # 3. Assign each base problem to a group based on its rarest variant
+    groups: Dict[str, List[str]] = {}  # group_key -> list of base_ids
+    for base_id, available in base_to_variants.items():
+        group_key = "common"
+        for rare_type in rarity_order:
+            if rare_type in available:
+                group_key = rare_type
+                break
+        groups.setdefault(group_key, []).append(base_id)
+
+    # 4. Within each group, split proportionally (eval_size / total)
+    total = len(base_to_variants)
+    eval_ratio = eval_size / total
+
+    eval_base_ids = set()
+    train_base_ids = set()
+    for group_key, ids in groups.items():
+        rng.shuffle(ids)
+        n_eval = max(1, round(len(ids) * eval_ratio))  # at least 1 per group
+        eval_base_ids.update(ids[:n_eval])
+        train_base_ids.update(ids[n_eval:])
+
+    # Log the split
+    print(f"  Stratified split: {len(train_base_ids)} train / {len(eval_base_ids)} eval base problems")
+    for group_key, ids in sorted(groups.items()):
+        n_train = sum(1 for x in ids if x in train_base_ids)
+        n_eval = sum(1 for x in ids if x in eval_base_ids)
+        print(f"    {group_key:12s}: {n_train} train, {n_eval} eval (of {len(ids)} total)")
 
     # Degradation type label from field name
     _type_map = {
