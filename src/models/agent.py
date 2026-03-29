@@ -156,8 +156,10 @@ class Agent:
         # ── Constrained prefix selection ─────────────────────────────────
         # Score both [ASK] and [ANSWER] prefixes autoregressively,
         # then sample which prefix to use based on their total log-probs.
-        ask_logp = _score_prefix(model, past, self._ask_ids, device)
-        ans_logp = _score_prefix(model, past, self._answer_ids, device)
+        # Deep-copy the cache so scoring [ASK] doesn't pollute the cache for [ANSWER].
+        import copy
+        ask_logp = _score_prefix(model, copy.deepcopy(past), self._ask_ids, device)
+        ans_logp = _score_prefix(model, copy.deepcopy(past), self._answer_ids, device)
 
         # Sample prefix proportional to exp(logp) (i.e., softmax over the two)
         logps = torch.tensor([ask_logp, ans_logp])
