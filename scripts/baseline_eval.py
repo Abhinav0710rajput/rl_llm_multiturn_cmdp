@@ -100,14 +100,20 @@ def main():
         upper = action_text.strip().upper()
         if upper.startswith("[ANSWER]"):
             code = extract_code(action_text)
-            score = executor.run(code, p.test_cases, p.entry_point)
             action_type = "answer"
         elif upper.startswith("[ASK]"):
-            score = 0.0
             action_type = "ask"
         else:
-            score = 0.0
             action_type = "malformed"
+
+        # Always try to extract and run code, even from malformed/ask outputs
+        # This tells us if the model COULD have scored, separate from formatting
+        code = extract_code(action_text)
+        if not code.strip() and "def " in action_text:
+            # Fallback: grab everything from first 'def' onward
+            idx = action_text.find("def ")
+            code = action_text[idx:].strip()
+        score = executor.run(code, p.test_cases, p.entry_point) if code.strip() else 0.0
 
         single_results.append({
             "task_id": p.task_id,
