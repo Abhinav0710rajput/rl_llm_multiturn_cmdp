@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--n", type=int, default=30, help="Number of problems to test")
     parser.add_argument("--multi-turn", action="store_true", help="Also run multi-turn episodes with simulator")
     parser.add_argument("--two-gpu", action="store_true", help="Use 2 GPUs")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed (default: random)")
     parser.add_argument("--config", default="configs/default.yaml")
     return parser.parse_args()
 
@@ -65,7 +66,9 @@ def main():
     )
 
     # Sample diverse problems (use eval set, pick different base problems)
-    rng = random.Random(42)
+    seed = args.seed if args.seed is not None else random.randint(0, 999999)
+    print(f"  Seed: {seed}")
+    rng = random.Random(seed)
     seen_base = set()
     diverse_problems = []
     shuffled = list(eval_problems)
