@@ -42,10 +42,12 @@ from src.training.rollout import collect_rollouts, RolloutBuffer
 
 
 class PPOLagrangianTrainer:
-    def __init__(self, cfg, train_problems: List[Problem], eval_problems: List[Problem]):
+    def __init__(self, cfg, train_problems: List[Problem], eval_problems: List[Problem],
+                 verbose: bool = False):
         self.cfg = cfg
         self.train_problems = train_problems
         self.eval_problems = eval_problems
+        self.verbose = verbose
         self.device = torch.device(cfg.model.train_device)
 
         random.seed(cfg.training.seed)
@@ -120,6 +122,21 @@ class PPOLagrangianTrainer:
             )
 
             rollout_stats = buffer.stats()
+
+            # Log episode details in verbose mode
+            if self.verbose:
+                n_show = min(3, len(buffer.episodes))
+                for ep in buffer.episodes[:n_show]:
+                    print(f"\n  --- Episode: {ep.problem_id} ---")
+                    for t in ep.transitions:
+                        action_type = t.info.get("action_type", "?")
+                        print(f"    Turn {t.turn}: [{action_type.upper()}] {t.action_text[:200]}")
+                        if action_type == "ask":
+                            print(f"      Simulator: {t.info.get('answer', '')[:200]}")
+                            print(f"      Atomic questions: {t.info.get('atomic_count', '?')}")
+                        elif action_type == "answer":
+                            print(f"      pass@1: {t.info.get('pass_rate', 0.0):.2f}")
+                    print(f"    Summary: reward={ep.total_reward:.2f}, q={ep.total_cost_q:.0f}, turns={ep.n_turns}")
 
             # 2. Compute GAE returns & advantages
             buffer.compute_returns(

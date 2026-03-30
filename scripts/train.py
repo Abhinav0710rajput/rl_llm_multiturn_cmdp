@@ -42,6 +42,10 @@ def parse_args():
         help="Path to checkpoint directory to resume training from",
     )
     parser.add_argument(
+        "--verbose", action="store_true",
+        help="Print episode details for first 3 episodes per iteration",
+    )
+    parser.add_argument(
         "overrides", nargs="*",
         help="OmegaConf-style overrides, e.g. training.n_iterations=40",
     )
@@ -78,7 +82,7 @@ def main():
     print(f"  Eval problems:  {len(eval_problems)}")
 
     # Build trainer
-    trainer = PPOLagrangianTrainer(cfg, train_problems, eval_problems)
+    trainer = PPOLagrangianTrainer(cfg, train_problems, eval_problems, verbose=args.verbose)
 
     # Resume if requested
     if args.resume:
