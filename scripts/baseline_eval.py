@@ -142,6 +142,10 @@ def main():
 
         status = f"pass@1={score:.2f}" if action_type == "answer" else f"{action_type} (score={score:.2f})"
         print(f"\n  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type}): {status}")
+        print(f"  Original spec (hidden from agent):")
+        for line in p.original_prompt.strip().splitlines():
+            print(f"    {line}")
+        print(f"  Test cases: {p.test_cases}")
         print(f"  Degraded spec:")
         for line in p.degraded_prompt.strip().splitlines():
             print(f"    {line}")
@@ -188,6 +192,10 @@ def main():
                 total_t = 0
 
                 print(f"\n  [{i+1}/{len(diverse_problems)}] {p.task_id} ({p.degradation_type})")
+                print(f"  Original spec (hidden from agent):")
+                for line in p.original_prompt.strip().splitlines():
+                    print(f"    {line}")
+                print(f"  Test cases: {p.test_cases}")
                 print(f"  Degraded spec:")
                 for line in p.degraded_prompt.strip().splitlines():
                     print(f"    {line}")
