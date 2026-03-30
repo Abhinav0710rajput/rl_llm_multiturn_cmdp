@@ -196,8 +196,11 @@ The dataset is **HumanEvalComm** — 164 Python coding problems from HumanEval, 
 | Inconsistency | `prompt1c` | Examples contradict the description |
 | Incompleteness | `prompt1p` | All examples and details stripped; only a stub remains |
 | Ambiguity + Inconsistency | `prompt2ac` | Both combined |
+| Ambiguity + Incompleteness | `prompt2ap` | Both combined |
+| Inconsistency + Incompleteness | `prompt2cp` | Both combined |
+| All three | `prompt3acp` | Ambiguity + Inconsistency + Incompleteness |
 
-**Train/test split:** 100 base problems are held out as the test set. All variants of a held-out base problem are also held out (the split is at the base problem level, not variant level). This is enforced in `src/data/dataset.py`.
+**Train/test split:** The split is **stratified** at the base problem level — problems are grouped by their rarest available variant, then each group is split proportionally (~60% eval, ~40% train). This guarantees all 7 degradation types appear in both train and eval sets. All variants of a base problem go to the same set (no leakage). Enforced in `src/data/dataset.py`.
 
 **Which variants are used for training** is controlled by `data.use_variants` in the config:
 ```yaml
@@ -207,6 +210,9 @@ data:
     - prompt1c
     - prompt1p
     - prompt2ac
+    - prompt2ap
+    - prompt2cp
+    - prompt3acp
 ```
 
 ---
@@ -242,6 +248,9 @@ You are a helpful assistant who holds the complete specification for a coding pr
 
 Full specification:
 {original_prompt}
+
+Note: The agent may refer to the function by a different name (e.g., "candidate").
+Treat any function name the agent uses as referring to the function described above.
 
 Rules:
 1. Answer ONLY the specific question(s) the agent asks. Do not volunteer extra information.
@@ -523,6 +532,9 @@ data:
     - prompt1c
     - prompt1p
     - prompt2ac
+    - prompt2ap
+    - prompt2cp
+    - prompt3acp
 ```
 
 ---
@@ -547,8 +559,17 @@ A fixed penalty requires hand-tuning — you don't know in advance how large the
 **Multi-question handling (the `multi_question_mode` setting):**
 When the agent writes `[ASK] What is X? And what is Y?`, it is asking two questions in one turn. In `count` mode (default), the user simulator counts 2 atomic questions and the environment charges `cost_q = 2`. This prevents the agent from exploiting the budget by batching questions. In `truncate` mode, only the first question is answered and `cost_q = 1` always. The default `count` mode is more principled but depends on GPT-4o-mini counting accurately; `truncate` mode is simpler but restricts the agent's action space. Switch with `environment.multi_question_mode=truncate`.
 
+**Function name handling in code execution:**
+Degraded specs sometimes rename functions to `candidate`, but test cases use the original name. The code executor renames the first function definition in the agent's code to match the expected `entry_point` before running tests. This means the agent is evaluated purely on code logic, not on whether it guessed the right function name.
+
+**Function name handling in the user simulator:**
+The simulator's system prompt tells GPT-4o-mini to treat any function name the agent uses (e.g., `candidate`) as referring to the function in the original spec. Without this, the simulator would say "I don't know about `candidate`" when the original spec defines `decode_cyclic`.
+
 **Why partial credit for code evaluation?**
 Binary pass/fail gives a flat reward landscape. Partial credit (fraction of assertions passing) gives smoother gradients — an agent that gets 8/10 tests right receives reward 0.8, not 0. This significantly stabilises PPO training.
+
+**Why a stratified train/eval split?**
+Rare degradation types (`prompt3acp` = 12 problems, `prompt2cp` = 35 problems) could end up entirely in one set with a random split. The stratified split groups problems by their rarest variant and splits each group proportionally, guaranteeing all 7 types appear in both sets.
 
 **Why `ast.literal_eval` and not `json.loads` for test cases?**
 HumanEvalComm stores test cases as Python-literal strings (single-quoted dicts), not JSON. `json.loads` will fail on them. Always use `ast.literal_eval`.

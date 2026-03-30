@@ -57,7 +57,7 @@ lr_value:              1e-4
 lr_lambda:             0.01
 optimizer:             adamw_8bit  # saves ~8GB vs full-precision AdamW
 
-d1_values:             [0, 1, 2, 3, 4, 5]
+d1_values:             [0, 1]
 n_iterations:          80
 ```
 

@@ -248,4 +248,5 @@ input=[5,2,5,2,3,3,9,0,123] → output=[6,3,6,3,4,4,10,1,124]
 | 105 test cases for `add` | A few problems have very dense test suites — partial credit scoring (fraction passed) matters more for these |
 | 1516 total test assertions across 164 problems | Code executor will run ~9 assertions per episode on average |
 | 6 duplicate `entry_point` names | Use `name` field (HumanEval/N) as primary key in all data structures |
-| `prompt2ap`, `prompt2cp`, `prompt3acp` are sparse | Don't rely on combined variants for training — use 1a/1c/1p/2ac as primary training data |
+| `prompt2ap`, `prompt2cp`, `prompt3acp` are sparse | All 7 types are included in training. Stratified split ensures they appear in both train and eval sets |
+| Degraded specs rename functions to `candidate` | Code executor renames agent's function to match `entry_point`. Simulator prompt tells GPT-4o-mini to treat any name as the spec'd function |
