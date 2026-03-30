@@ -9,17 +9,60 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
-def _rename_function(code: str, entry_point: str) -> str:
+def _extract_helper_context(degraded_prompt: str, entry_point: str) -> str:
     """
-    Rename the first function definition in the code to entry_point.
-    This makes the function name irrelevant — whatever the agent called it,
-    the tests will find it under the expected name.
+    Extract helper functions and imports from the degraded prompt that the
+    agent's code may depend on (e.g., poly() for find_zero).
+
+    Returns everything from the degraded prompt EXCEPT the main function
+    (identified by entry_point or 'candidate').
     """
-    # Match 'def some_name(' and replace with 'def entry_point('
-    return re.sub(r'def\s+\w+\s*\(', f'def {entry_point}(', code, count=1)
+    lines = degraded_prompt.split("\n")
+    context_lines = []
+    skip = False
+
+    for line in lines:
+        # Detect start of the main function (skip it — agent provides their own)
+        stripped = line.strip()
+        if re.match(rf'def\s+({re.escape(entry_point)}|candidate)\s*\(', stripped):
+            skip = True
+            continue
+        # Detect start of a different function (stop skipping)
+        if skip and re.match(r'def\s+\w+\s*\(', stripped):
+            skip = False
+        # If we're inside the main function body, skip it
+        if skip and (stripped == "" or line[0] in (" ", "\t") or stripped.startswith('"""') or stripped.startswith("'''")):
+            continue
+        skip = False
+        context_lines.append(line)
+
+    return "\n".join(context_lines).strip()
+
+
+def _alias_main_function(code: str, entry_point: str) -> str:
+    """
+    Add an alias so the last top-level function in the code is accessible
+    via entry_point name. This avoids renaming the wrong function when
+    helper functions are defined before the main function.
+    """
+    # If the code already defines a function with the entry_point name, no alias needed
+    if re.search(rf'def\s+{re.escape(entry_point)}\s*\(', code):
+        return code
+
+    # Find all top-level function names (not indented)
+    func_names = re.findall(r'^def\s+(\w+)\s*\(', code, re.MULTILINE)
+    if not func_names:
+        return code
+
+    # Alias the last defined function to entry_point
+    last_func = func_names[-1]
+    if last_func != entry_point:
+        code = code.rstrip() + f"\n\n{entry_point} = {last_func}\n"
+
+    return code
 
 
 def _format_output(out) -> str:
@@ -46,10 +89,7 @@ def _expand_template_relation(rel: str, inp, entry_point: str) -> str:
     """
     Expand template-based test relations that use $demo$ and $input$ placeholders.
 
-    Example relation:
-        from $demo$ import poly\nimport math\nsolution = find_zero($input$)\nprint(math.fabs(poly($input$, solution)) < 1e-4)
-
-    - $demo$ imports are stripped (helper functions like poly are already in the code)
+    - $demo$ imports are stripped (helper functions are included via context)
     - $input$ is replaced with the actual input value
     - candidate is replaced with entry_point
     - print(expr) is converted to assert expr
@@ -60,14 +100,14 @@ def _expand_template_relation(rel: str, inp, entry_point: str) -> str:
     expanded = rel.replace("$input$", inp_str)
     expanded = expanded.replace("candidate", entry_point)
 
-    # Remove $demo$ import lines (the functions are already defined in the code)
+    # Remove $demo$ import lines (the functions are included via context)
     result_lines = []
     for line in expanded.split("\n"):
         if "$demo$" in line:
-            continue  # skip import from $demo$
+            continue
         # Convert print(condition) to assert condition
         if line.strip().startswith("print(") and line.strip().endswith(")"):
-            inner = line.strip()[6:-1]  # extract inside of print(...)
+            inner = line.strip()[6:-1]
             result_lines.append(f"assert {inner}")
         else:
             result_lines.append(line)
@@ -77,18 +117,29 @@ def _expand_template_relation(rel: str, inp, entry_point: str) -> str:
 
 # ── Test case → assert statement conversion ───────────────────────────────────
 
-def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> str:
+def build_test_program(
+    code: str, test_cases: List[Dict], entry_point: str,
+    context: str = "",
+) -> str:
     """
     Build a self-contained Python program from the agent's code + test cases.
 
-    Each test case has:
-        input:    string representation of argument(s), e.g. "[1,2,3], 2"
-        output:   string representation of expected return, e.g. "[2,3,4]"
-        relation: "==" or custom expression like "abs(candidate(x) - 0.5) < 1e-6"
+    Args:
+        code:        the agent's extracted code
+        test_cases:  list of test case dicts
+        entry_point: expected function name for test assertions
+        context:     helper functions/imports from the degraded spec (e.g., poly)
     """
-    # Rename the agent's function to match entry_point, regardless of what the agent called it
-    code = _rename_function(code, entry_point)
-    lines = [textwrap.dedent(code), ""]
+    code = _alias_main_function(code, entry_point)
+    lines = []
+
+    # Include helper context (e.g., poly function, imports) before agent's code
+    if context.strip():
+        lines.append(textwrap.dedent(context))
+        lines.append("")
+
+    lines.append(textwrap.dedent(code))
+    lines.append("")
 
     for tc in test_cases:
         inp = tc.get("input", "")
@@ -96,32 +147,38 @@ def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> s
         rel = tc.get("relation", "==")
 
         if rel == "==":
-            # Standard equality check
             out_expr = _format_output(out)
             lines.append(f"assert {entry_point}({inp}) == {out_expr}")
         elif "$demo$" in rel or "$input$" in rel:
-            # Template-based relation (e.g., find_zero uses poly from the same file)
             expr = _expand_template_relation(rel, inp, entry_point)
             lines.append(expr)
         elif "candidate" in rel:
-            # Custom relation referencing 'candidate' — substitute with entry_point
             expr = rel.replace("candidate", entry_point)
             lines.append(f"assert {expr}")
         else:
-            # Raw relation string — treat as full assert expression
             lines.append(f"assert {rel}")
 
     return "\n".join(lines)
 
 
-def _build_single_test(code: str, test_case: Dict, entry_point: str) -> str:
+def _build_single_test(
+    code: str, test_case: Dict, entry_point: str,
+    context: str = "",
+) -> str:
     """Build a program that runs exactly one test case."""
     inp = test_case.get("input", "")
     out = test_case.get("output", "")
     rel = test_case.get("relation", "==")
 
-    code = _rename_function(code, entry_point)
-    lines = [textwrap.dedent(code), ""]
+    code = _alias_main_function(code, entry_point)
+    lines = []
+
+    if context.strip():
+        lines.append(textwrap.dedent(context))
+        lines.append("")
+
+    lines.append(textwrap.dedent(code))
+    lines.append("")
 
     if rel == "==":
         out_expr = _format_output(out)
@@ -145,15 +202,21 @@ class CodeExecutor:
         self.timeout = cfg.code_executor.timeout
         self.partial_credit = cfg.code_executor.partial_credit
 
-    def run(self, code: str, test_cases: List[Dict], entry_point: str) -> float:
+    def run(
+        self, code: str, test_cases: List[Dict], entry_point: str,
+        context: str = "",
+    ) -> float:
         """
         Execute agent code against the test suite.
 
+        Args:
+            code:        the agent's extracted code
+            test_cases:  test case dicts
+            entry_point: expected function name
+            context:     helper functions from the degraded spec (optional)
+
         Returns:
             pass@1 score in [0.0, 1.0]
-            - 1.0  → all tests pass
-            - 0.0  → execution error or all tests fail
-            - 0.x  → fraction passing (only if partial_credit=True)
         """
         if not code.strip():
             return 0.0
@@ -161,24 +224,22 @@ class CodeExecutor:
             return 0.0
 
         if self.partial_credit:
-            return self._run_partial(code, test_cases, entry_point)
+            return self._run_partial(code, test_cases, entry_point, context)
         else:
-            return self._run_all(code, test_cases, entry_point)
+            return self._run_all(code, test_cases, entry_point, context)
 
-    def _run_all(self, code: str, test_cases: List[Dict], entry_point: str) -> float:
-        """Run all tests together. Returns 1.0 if all pass, 0.0 otherwise."""
-        program = build_test_program(code, test_cases, entry_point)
+    def _run_all(self, code, test_cases, entry_point, context=""):
+        program = build_test_program(code, test_cases, entry_point, context)
         success = _execute_program(program, self.timeout)
         return 1.0 if success else 0.0
 
-    def _run_partial(self, code: str, test_cases: List[Dict], entry_point: str) -> float:
-        """Run each test case individually. Returns fraction that pass."""
+    def _run_partial(self, code, test_cases, entry_point, context=""):
         if not test_cases:
             return 0.0
 
         passed = 0
         for tc in test_cases:
-            program = _build_single_test(code, tc, entry_point)
+            program = _build_single_test(code, tc, entry_point, context)
             if _execute_program(program, self.timeout):
                 passed += 1
 

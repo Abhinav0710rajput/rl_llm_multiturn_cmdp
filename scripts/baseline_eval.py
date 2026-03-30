@@ -52,7 +52,7 @@ def main():
     from src.data.dataset import load_humaneval_comm
     from src.models.agent import Agent
     from src.environment.env import ClarificationEnv, _build_prompt
-    from src.environment.code_executor import CodeExecutor, extract_code
+    from src.environment.code_executor import CodeExecutor, extract_code, _extract_helper_context
 
     print("=" * 60)
     print(f"BASELINE EVAL — {args.n} problems")
@@ -131,7 +131,8 @@ def main():
             # Fallback: grab everything from first 'def' onward
             idx = action_text.find("def ")
             code = action_text[idx:].strip()
-        score = executor.run(code, p.test_cases, p.entry_point) if code.strip() else 0.0
+        context = _extract_helper_context(p.degraded_prompt, p.entry_point)
+        score = executor.run(code, p.test_cases, p.entry_point, context=context) if code.strip() else 0.0
 
         single_results.append({
             "task_id": p.task_id,

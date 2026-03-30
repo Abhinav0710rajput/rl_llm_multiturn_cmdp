@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from src.data.dataset import Problem
-from src.environment.code_executor import CodeExecutor, extract_code
+from src.environment.code_executor import CodeExecutor, extract_code, _extract_helper_context
 from src.environment.user_simulator import UserSimulator
 
 
@@ -164,10 +164,14 @@ class ClarificationEnv:
         # ── [ANSWER] branch ───────────────────────────────────────────────────
         elif action_upper.startswith("[ANSWER]"):
             code = extract_code(action_text)
+            context = _extract_helper_context(
+                state.problem.degraded_prompt, state.problem.entry_point
+            )
             pass_rate = self.executor.run(
                 code=code,
                 test_cases=state.problem.test_cases,
                 entry_point=state.problem.entry_point,
+                context=context,
             )
 
             next_state = EnvState(
