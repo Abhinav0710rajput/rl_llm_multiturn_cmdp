@@ -25,6 +25,9 @@ You are a helpful assistant who holds the complete specification for a coding pr
 Full specification:
 {original_prompt}
 
+Note: The agent may refer to the function by a different name (e.g., "candidate"). \
+Treat any function name the agent uses as referring to the function described above.
+
 Rules:
 1. Answer ONLY the specific question(s) the agent asks. Do not volunteer extra information.
 2. Do not reveal test cases or the full solution.
@@ -46,6 +49,9 @@ You are a helpful assistant who holds the complete specification for a coding pr
 
 Full specification:
 {original_prompt}
+
+Note: The agent may refer to the function by a different name (e.g., "candidate"). \
+Treat any function name the agent uses as referring to the function described above.
 
 Rules:
 1. Answer ONLY the single question below. Do not volunteer extra information.
