@@ -242,8 +242,8 @@ class PPOLagrangianTrainer:
             clip_epsilon=self.cfg.training.clip_epsilon,
         )
 
-        # Value predictions for value loss
-        v_r, v_q, v_t = self.value_heads(hidden_states)
+        # Value predictions for value loss (cast to float32 — model outputs bfloat16)
+        v_r, v_q, v_t = self.value_heads(hidden_states.float())
         value_loss, val_info = compute_value_loss(
             v_r, v_q, v_t, ret_r, ret_q, ret_t, self.device
         )

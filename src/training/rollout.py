@@ -138,8 +138,8 @@ def _compute_episode_advantages(
     T = len(transitions)
     device = next(value_heads.parameters()).device
 
-    # Get value estimates for each state
-    hiddens = torch.stack([t.state_hidden for t in transitions]).to(device)  # (T, hidden_dim)
+    # Get value estimates for each state (cast to float32 — model outputs bfloat16)
+    hiddens = torch.stack([t.state_hidden for t in transitions]).to(device).float()
     with torch.no_grad():
         v_r, v_q, v_t = value_heads.predict_all(hiddens)
 
