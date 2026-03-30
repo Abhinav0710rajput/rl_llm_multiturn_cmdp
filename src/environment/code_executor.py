@@ -22,6 +22,26 @@ def _rename_function(code: str, entry_point: str) -> str:
     return re.sub(r'def\s+\w+\s*\(', f'def {entry_point}(', code, count=1)
 
 
+def _format_output(out) -> str:
+    """
+    Format a test case output value for insertion into an assert statement.
+    Numeric and list outputs can be inserted directly; string outputs need quoting.
+    """
+    # If it's already a valid Python literal (number, list, bool, None), use as-is
+    if isinstance(out, (int, float, bool, list, dict, type(None))):
+        return repr(out)
+    # String output — try to parse as a Python literal first
+    s = str(out)
+    try:
+        import ast
+        ast.literal_eval(s)
+        # It's already a valid Python expression (e.g., "[1,2,3]", "True", "0.5")
+        return s
+    except (ValueError, SyntaxError):
+        # It's a bare string (e.g., "fdcb") — needs quoting
+        return repr(s)
+
+
 # ── Test case → assert statement conversion ───────────────────────────────────
 
 def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> str:
@@ -44,7 +64,10 @@ def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> s
 
         if rel == "==":
             # Standard equality check
-            lines.append(f"assert {entry_point}({inp}) == {out}")
+            # Output may be a bare string (e.g. 'fdcb') that needs quoting
+            # Use repr() to safely format the output value
+            out_expr = _format_output(out)
+            lines.append(f"assert {entry_point}({inp}) == {out_expr}")
         elif "candidate" in rel:
             # Custom relation referencing 'candidate' — substitute with entry_point
             expr = rel.replace("candidate", entry_point)
@@ -66,7 +89,8 @@ def _build_single_test(code: str, test_case: Dict, entry_point: str) -> str:
     lines = [textwrap.dedent(code), ""]
 
     if rel == "==":
-        lines.append(f"assert {entry_point}({inp}) == {out}")
+        out_expr = _format_output(out)
+        lines.append(f"assert {entry_point}({inp}) == {out_expr}")
     elif "candidate" in rel:
         expr = rel.replace("candidate", entry_point)
         lines.append(f"assert {expr}")
