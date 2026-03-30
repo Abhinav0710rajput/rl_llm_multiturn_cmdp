@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=01:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=logs/train_sanity_%j.out
 
 source ~/.bashrc
