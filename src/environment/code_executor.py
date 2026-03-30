@@ -24,6 +24,17 @@ def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> s
     """
     lines = [textwrap.dedent(code), ""]
 
+    # If the agent defined 'candidate' but tests use a different entry_point, alias it
+    if entry_point != "candidate" and "def candidate(" in code:
+        lines.append(f"{entry_point} = candidate")
+        lines.append("")
+    # If the agent used the original entry_point but tests reference 'candidate'
+    elif entry_point == "candidate":
+        pass  # no alias needed
+    # If the agent used the entry_point name directly, no alias needed
+    elif f"def {entry_point}(" in code:
+        pass
+
     for tc in test_cases:
         inp = tc.get("input", "")
         out = tc.get("output", "")
@@ -50,6 +61,11 @@ def _build_single_test(code: str, test_case: Dict, entry_point: str) -> str:
     rel = test_case.get("relation", "==")
 
     lines = [textwrap.dedent(code), ""]
+
+    # Alias candidate -> entry_point if needed
+    if entry_point != "candidate" and "def candidate(" in code:
+        lines.append(f"{entry_point} = candidate")
+        lines.append("")
 
     if rel == "==":
         lines.append(f"assert {entry_point}({inp}) == {out}")
