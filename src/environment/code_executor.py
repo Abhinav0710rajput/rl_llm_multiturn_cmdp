@@ -42,6 +42,39 @@ def _format_output(out) -> str:
         return repr(s)
 
 
+def _expand_template_relation(rel: str, inp, entry_point: str) -> str:
+    """
+    Expand template-based test relations that use $demo$ and $input$ placeholders.
+
+    Example relation:
+        from $demo$ import poly\nimport math\nsolution = find_zero($input$)\nprint(math.fabs(poly($input$, solution)) < 1e-4)
+
+    - $demo$ imports are stripped (helper functions like poly are already in the code)
+    - $input$ is replaced with the actual input value
+    - candidate is replaced with entry_point
+    - print(expr) is converted to assert expr
+    """
+    inp_str = str(inp)
+
+    # Replace template variables
+    expanded = rel.replace("$input$", inp_str)
+    expanded = expanded.replace("candidate", entry_point)
+
+    # Remove $demo$ import lines (the functions are already defined in the code)
+    result_lines = []
+    for line in expanded.split("\n"):
+        if "$demo$" in line:
+            continue  # skip import from $demo$
+        # Convert print(condition) to assert condition
+        if line.strip().startswith("print(") and line.strip().endswith(")"):
+            inner = line.strip()[6:-1]  # extract inside of print(...)
+            result_lines.append(f"assert {inner}")
+        else:
+            result_lines.append(line)
+
+    return "\n".join(result_lines)
+
+
 # ── Test case → assert statement conversion ───────────────────────────────────
 
 def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> str:
@@ -64,10 +97,12 @@ def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> s
 
         if rel == "==":
             # Standard equality check
-            # Output may be a bare string (e.g. 'fdcb') that needs quoting
-            # Use repr() to safely format the output value
             out_expr = _format_output(out)
             lines.append(f"assert {entry_point}({inp}) == {out_expr}")
+        elif "$demo$" in rel or "$input$" in rel:
+            # Template-based relation (e.g., find_zero uses poly from the same file)
+            expr = _expand_template_relation(rel, inp, entry_point)
+            lines.append(expr)
         elif "candidate" in rel:
             # Custom relation referencing 'candidate' — substitute with entry_point
             expr = rel.replace("candidate", entry_point)
@@ -91,6 +126,9 @@ def _build_single_test(code: str, test_case: Dict, entry_point: str) -> str:
     if rel == "==":
         out_expr = _format_output(out)
         lines.append(f"assert {entry_point}({inp}) == {out_expr}")
+    elif "$demo$" in rel or "$input$" in rel:
+        expr = _expand_template_relation(rel, inp, entry_point)
+        lines.append(expr)
     elif "candidate" in rel:
         expr = rel.replace("candidate", entry_point)
         lines.append(f"assert {expr}")
