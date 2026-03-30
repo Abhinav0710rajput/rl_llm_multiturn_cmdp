@@ -217,11 +217,13 @@ assert incr_list([-1, 0, 1]) == [0, 1, 2]  # PASS
 
 **Turn 2 — Transition recorded:**
 ```
-reward  = 1.0   (3/3 tests passed → pass@1 = 1.0)
+reward  = 1.046 (3/3 tests passed → pass@1 = 1.0 + efficiency bonus ≈ 0.046)
 cost_q  = 0.0   (no question asked)
 cost_t  = 1.0   (used a turn)
 done    = True
 ```
+
+Note: The efficiency bonus = α·(1 - turns/max_turns) + β·(1 - questions/d₁) rewards shorter episodes and fewer questions. With α=β=0.025, max_turns=6, d₁=2, turn_count=2, question_count=1: bonus = 0.025·(1-2/6) + 0.025·(1-1/2) = 0.0167 + 0.0125 = 0.029. This is a small tiebreaker that discourages unnecessary turns/questions within the budget.
 
 ---
 
@@ -230,15 +232,15 @@ done    = True
 | Turn | Action | reward | cost_q | cost_t |
 |------|--------|--------|--------|--------|
 | 1    | [ASK]  | 0.0    | 1.0    | 1.0    |
-| 2    | [ANSWER] | 1.0  | 0.0    | 1.0    |
-| **Total** | | **1.0** | **1.0** | **2.0** |
+| 2    | [ANSWER] | 1.029 | 0.0    | 1.0    |
+| **Total** | | **1.029** | **1.0** | **2.0** |
 
 ---
 
 **Reward & Constraint Formulation:**
 
 ```
-Episode return (reward):     R = 1.0         (pass@1 from final code)
+Episode return (reward):     R = 1.029       (pass@1 + efficiency bonus)
 Episode cost (questions):    C_q = 1.0       (1 question asked)
 Episode cost (turns):        C_t = 2.0       (2 turns used)
 

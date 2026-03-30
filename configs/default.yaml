@@ -24,6 +24,8 @@ environment:
   # "count"    → user simulator counts atomic questions; cost_q = N per turn
   # "truncate" → hard single-question enforcement; cost_q always 0 or 1
   multi_question_mode: count
+  efficiency_alpha: 0.025   # small bonus for fewer turns (tiebreaker vs waste)
+  efficiency_beta: 0.025    # small bonus for fewer questions
 
 user_simulator:
   model: gpt-4o-mini
