@@ -51,7 +51,7 @@ training:
   optimizer: adamw_8bit     # bitsandbytes 8-bit AdamW
   warmup_steps: 20
   n_iterations: 80
-  save_interval: 20
+  save_interval: 1
   eval_interval: 10
   seed: 42
 

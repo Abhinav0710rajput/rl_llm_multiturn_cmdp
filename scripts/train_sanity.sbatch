@@ -18,4 +18,4 @@ python scripts/train.py --d1 1 --verbose \
     training.n_iterations=5 \
     training.rollout_batch_size=32 \
     training.eval_interval=5 \
-    training.save_interval=5
+    training.save_interval=1
