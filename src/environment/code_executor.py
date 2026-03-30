@@ -3,12 +3,23 @@ Sandboxed Python code executor.
 Runs agent-generated code against a problem's test cases and returns pass@1.
 """
 
+import re
 import resource
 import subprocess
 import sys
 import tempfile
 import textwrap
 from typing import List, Dict
+
+
+def _rename_function(code: str, entry_point: str) -> str:
+    """
+    Rename the first function definition in the code to entry_point.
+    This makes the function name irrelevant — whatever the agent called it,
+    the tests will find it under the expected name.
+    """
+    # Match 'def some_name(' and replace with 'def entry_point('
+    return re.sub(r'def\s+\w+\s*\(', f'def {entry_point}(', code, count=1)
 
 
 # ── Test case → assert statement conversion ───────────────────────────────────
@@ -22,18 +33,9 @@ def build_test_program(code: str, test_cases: List[Dict], entry_point: str) -> s
         output:   string representation of expected return, e.g. "[2,3,4]"
         relation: "==" or custom expression like "abs(candidate(x) - 0.5) < 1e-6"
     """
+    # Rename the agent's function to match entry_point, regardless of what the agent called it
+    code = _rename_function(code, entry_point)
     lines = [textwrap.dedent(code), ""]
-
-    # If the agent defined 'candidate' but tests use a different entry_point, alias it
-    if entry_point != "candidate" and "def candidate(" in code:
-        lines.append(f"{entry_point} = candidate")
-        lines.append("")
-    # If the agent used the original entry_point but tests reference 'candidate'
-    elif entry_point == "candidate":
-        pass  # no alias needed
-    # If the agent used the entry_point name directly, no alias needed
-    elif f"def {entry_point}(" in code:
-        pass
 
     for tc in test_cases:
         inp = tc.get("input", "")
@@ -60,12 +62,8 @@ def _build_single_test(code: str, test_case: Dict, entry_point: str) -> str:
     out = test_case.get("output", "")
     rel = test_case.get("relation", "==")
 
+    code = _rename_function(code, entry_point)
     lines = [textwrap.dedent(code), ""]
-
-    # Alias candidate -> entry_point if needed
-    if entry_point != "candidate" and "def candidate(" in code:
-        lines.append(f"{entry_point} = candidate")
-        lines.append("")
 
     if rel == "==":
         lines.append(f"assert {entry_point}({inp}) == {out}")
