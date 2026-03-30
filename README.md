@@ -560,7 +560,10 @@ A fixed penalty requires hand-tuning — you don't know in advance how large the
 When the agent writes `[ASK] What is X? And what is Y?`, it is asking two questions in one turn. In `count` mode (default), the user simulator counts 2 atomic questions and the environment charges `cost_q = 2`. This prevents the agent from exploiting the budget by batching questions. In `truncate` mode, only the first question is answered and `cost_q = 1` always. The default `count` mode is more principled but depends on GPT-4o-mini counting accurately; `truncate` mode is simpler but restricts the agent's action space. Switch with `environment.multi_question_mode=truncate`.
 
 **Function name handling in code execution:**
-Degraded specs sometimes rename functions to `candidate`, but test cases use the original name. The code executor renames the first function definition in the agent's code to match the expected `entry_point` before running tests. This means the agent is evaluated purely on code logic, not on whether it guessed the right function name.
+Degraded specs sometimes rename functions to `candidate`, but test cases use the original name. The code executor aliases the **last** top-level function in the agent's code to the expected `entry_point`. This avoids breaking helper functions (e.g., `is_prime` defined before `is_multiply_prime`). Additionally, helper functions from the degraded spec (e.g., `poly` for `find_zero`) are automatically extracted and prepended to the test program so tests can reference them.
+
+**String output quoting in test assertions:**
+Some test case outputs are bare strings (e.g., `fdcb` not `'fdcb'`). The executor detects these and wraps them in `repr()` so assertions compare against the correct type. Template-based test relations (using `$demo$` and `$input$` placeholders) are also expanded correctly.
 
 **Function name handling in the user simulator:**
 The simulator's system prompt tells GPT-4o-mini to treat any function name the agent uses (e.g., `candidate`) as referring to the function in the original spec. Without this, the simulator would say "I don't know about `candidate`" when the original spec defines `decode_cyclic`.
