@@ -25,18 +25,21 @@ def _extract_helper_context(degraded_prompt: str, entry_point: str) -> str:
     skip = False
 
     for line in lines:
-        # Detect start of the main function (skip it — agent provides their own)
         stripped = line.strip()
+
+        # Detect start of the main function → start skipping
         if re.match(rf'def\s+({re.escape(entry_point)}|candidate)\s*\(', stripped):
             skip = True
             continue
-        # Detect start of a different function (stop skipping)
-        if skip and re.match(r'def\s+\w+\s*\(', stripped):
-            skip = False
-        # If we're inside the main function body, skip it
-        if skip and (stripped == "" or line[0] in (" ", "\t") or stripped.startswith('"""') or stripped.startswith("'''")):
+
+        if skip:
+            # Detect start of a different top-level function → stop skipping
+            if re.match(r'def\s+\w+\s*\(', stripped) and not line[0].isspace():
+                skip = False
+                context_lines.append(line)
+            # Otherwise still inside the main function body → skip
             continue
-        skip = False
+
         context_lines.append(line)
 
     return "\n".join(context_lines).strip()

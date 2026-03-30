@@ -171,9 +171,13 @@ def _compute_episode_advantages(
         gae_q = delta_q + gamma * gae_lambda * mask * gae_q
         gae_t = delta_t + gamma * gae_lambda * mask * gae_t
 
-        adv_r.insert(0, gae_r)
-        adv_q.insert(0, gae_q)
-        adv_t.insert(0, gae_t)
+        adv_r.append(gae_r)
+        adv_q.append(gae_q)
+        adv_t.append(gae_t)
+
+    adv_r.reverse()
+    adv_q.reverse()
+    adv_t.reverse()
 
     ret_r = [adv_r[t] + v_r[t] for t in range(T)]
     ret_q = [adv_q[t] + v_q[t] for t in range(T)]

@@ -220,7 +220,7 @@ class ClarificationEnv:
                 next_state=next_state,
                 reward=0.0,
                 cost_q=0.0,
-                cost_t=0.0,
+                cost_t=1.0,
                 done=True,
                 info={
                     "action_type": "malformed",

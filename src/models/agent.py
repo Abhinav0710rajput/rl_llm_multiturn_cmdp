@@ -262,8 +262,8 @@ class Agent:
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-        # Hidden state at last prompt token
-        state_hidden = policy_out.hidden_states[-1][0, prompt_len - 1, :]  # (hidden_dim,)
+        # Hidden state at last prompt token (float32 to match value heads)
+        state_hidden = policy_out.hidden_states[-1][0, prompt_len - 1, :].float()  # (hidden_dim,)
 
         # Log-probs of action tokens
         logits = policy_out.logits[0, prompt_len - 1: -1, :]  # (action_len, vocab)

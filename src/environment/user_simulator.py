@@ -149,8 +149,9 @@ def _parse_count_response(raw: str) -> Tuple[str, int]:
         count = max(1, int(match.group(1)))
         answer_text = raw[:match.start()].strip()
     else:
-        # Fallback: count '?' marks as a rough proxy
-        count = max(1, raw.count("?"))
+        # Fallback: default to 1 question (counting ? in the response is unreliable
+        # since it counts question marks in the answer, not the agent's question)
+        count = 1
         answer_text = raw.strip()
 
     return answer_text, count
