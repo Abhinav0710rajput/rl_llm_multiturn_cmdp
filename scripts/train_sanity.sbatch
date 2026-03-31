@@ -15,7 +15,7 @@ conda activate rl-clarify
 cd $HOME/rl_llm_multiturn_project
 
 python scripts/train.py --d1 1 --verbose \
-    training.n_iterations=5 \
-    training.rollout_batch_size=32 \
-    training.eval_interval=5 \
-    training.save_interval=1
+    training.n_iterations=3 \
+    training.rollout_batch_size=16 \
+    training.eval_interval=3 \
+    training.save_interval=3
