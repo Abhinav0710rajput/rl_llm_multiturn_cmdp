@@ -200,15 +200,26 @@ async def _run_episode(
     env: ClarificationEnv,
 ) -> Episode:
     """Run one complete episode asynchronously."""
+    import time as _time
     state = env.reset(problem)
     transitions = []
 
     while not state.done:
         # GPU inference (synchronous — called from async context but not awaited)
+        t0 = _time.time()
         action_text, action_ids, action_logp, state_hidden = agent.generate(state.prompt)
+        gen_time = _time.time() - t0
 
         # Environment step (async — may call GPT-4o-mini API)
+        t0 = _time.time()
         result = await env.step(state, action_text)
+        step_time = _time.time() - t0
+
+        if episode_id < 3:  # Only log timing for first few episodes
+            action_type = result.info.get("action_type", "?")
+            print(f"    [ep={episode_id} turn={state.turn_count}] "
+                  f"{action_type} | gen={gen_time:.1f}s step={step_time:.1f}s "
+                  f"| tokens={len(action_ids)} prompt_len={len(state.prompt)}")
 
         transitions.append(Transition(
             episode_id=episode_id,

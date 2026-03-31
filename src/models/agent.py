@@ -132,6 +132,10 @@ class Agent:
         model.eval()
         device = self.rollout_device if self._rollout_model else self.train_device
 
+        # Ensure KV cache is enabled (critical for generation speed)
+        if hasattr(model.config, 'use_cache'):
+            model.config.use_cache = True
+
         enc = self.tokenizer(
             prompt,
             return_tensors="pt",
