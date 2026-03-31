@@ -1,0 +1,246 @@
+\documentclass[11pt]{article}
+
+% --- Packages ---
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+% --- Title ---
+\title{\textbf{Constrained Clarification: Training LLM Agents to Ask Better Questions Under Budget Constraints}}
+\author{
+  Acey Vogelstein, Abhinav Rajput, Deepali Balakrishna Ksheersagar \\
+  \texttt{DS-GA 1012 --- Reinforcement Learning, Spring 2026} \\
+  New York University
+}
+\date{March 30, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+When faced with ambiguous, incomplete, or inconsistent task specifications, LLM-based coding agents must decide whether to ask a clarifying question or attempt a solution directly. We frame this ask-vs-answer decision as a Constrained Markov Decision Process (CMDP), where the agent maximizes code correctness (pass@1) subject to a budget on the average number of clarifying questions per problem. We train Qwen2.5-Coder-7B-Instruct with LoRA adapters using PPO-Lagrangian, where a learned Lagrange multiplier automatically penalizes questions to satisfy the budget without manual tuning. A GPT-4o-mini user simulator answers clarifying questions using the full specification, and submitted code is evaluated against hidden test cases from the HumanEvalComm benchmark. By training policies under different budgets ($d_1 \in \{0, 1, 2, 3, 4, 5\}$), we construct a Pareto frontier of optimal policies ranging from ``never ask'' to ``ask freely.'' We hypothesize that budget-constrained agents will learn to selectively ask questions only on genuinely ambiguous problems, outperforming both zero-shot and always-ask baselines.
+\end{abstract}
+
+% ============================================================
+\section{Introduction and Motivation}
+% ============================================================
+
+Large language models (LLMs) are increasingly used as autonomous agents for code generation~\citep{chen2021codex, austin2021mbpp}. In practice, task specifications are often ambiguous, incomplete, or inconsistent. A capable agent should recognize when it lacks sufficient information and ask a clarifying question rather than guessing---but asking questions is not free. Each interaction consumes user time and system resources.
+
+This creates a fundamental \emph{exploration--exploitation tradeoff}: the agent must decide whether the expected information gain from a clarifying question justifies its cost. We frame this as a \textbf{constrained reinforcement learning} (CRL) problem and train an LLM to make this decision optimally under an explicit budget on the average number of questions it may ask.
+
+% ============================================================
+\section{Problem Formulation}
+% ============================================================
+
+We model the multi-turn coding interaction as a \textbf{Constrained Markov Decision Process} (CMDP) $(\mathcal{S}, \mathcal{A}, P, R, C, d)$:
+
+\begin{itemize}[nosep]
+  \item \textbf{State} $s_t$: the conversation history up to turn $t$, including the (degraded) problem specification and any prior question--answer exchanges.
+  \item \textbf{Action} $a_t \in \{\texttt{[ASK]}~q,~\texttt{[ANSWER]}~c\}$: the agent either asks a natural-language clarifying question $q$ or submits Python code $c$.
+  \item \textbf{Reward} $R$: the fraction of hidden unit tests passed (\texttt{pass@1} $\in [0,1]$). Partial credit is awarded: if the agent passes $k$ of $n$ test cases, $R = k/n$.
+  \item \textbf{Cost} $C_q(a_t)$: the number of \emph{atomic} questions in the agent's message (counted by the user simulator), so multi-question messages cost more than single questions.
+  \item \textbf{Budget} $d_1$: an upper bound on the expected average number of questions per episode: $\mathbb{E}_\pi\!\left[\sum_t C_q(a_t)\right] \leq d_1$.
+\end{itemize}
+
+The objective is to find a policy $\pi^*$ that maximizes expected reward subject to the budget constraint:
+\begin{equation}
+  \pi^* = \arg\max_\pi \; \mathbb{E}_\pi[R] \quad \text{s.t.} \quad \mathbb{E}_\pi\!\left[\textstyle\sum_t C_q(a_t)\right] \leq d_1.
+  \label{eq:cmdp}
+\end{equation}
+
+By sweeping $d_1 \in \{0, 1\}$, we compare a ``never ask'' policy against one that may ask at most one question on average. The Lagrangian automatically learns the appropriate penalty $\lambda_1$ to satisfy the budget constraint.
+
+% ============================================================
+\section{Approach}
+% ============================================================
+
+\subsection{Algorithm: PPO-Lagrangian}
+
+We solve the CMDP in Eq.~\eqref{eq:cmdp} via the \textbf{Lagrangian relaxation} approach~\citep{tessler2018reward, stooke2020responsive}, which converts the constrained problem into a saddle-point optimization:
+\begin{equation}
+  \min_{\lambda \geq 0} \; \max_\pi \; \mathbb{E}_\pi[R] - \lambda \!\left(\mathbb{E}_\pi\!\left[\textstyle\sum_t C_q(a_t)\right] - d_1\right).
+\end{equation}
+
+\textbf{Primal update.} We optimize the policy $\pi_\theta$ using Proximal Policy Optimization (PPO)~\citep{schulman2017ppo} with a Lagrangian-combined advantage:
+\begin{equation}
+  A^{\text{lag}}_t = A^R_t - \lambda_1 \, A^{C_q}_t - \lambda_2 \, A^{C_t}_t,
+\end{equation}
+where $A^R$, $A^{C_q}$, and $A^{C_t}$ are Generalized Advantage Estimates~\citep{schulman2015gae} computed from three independent value heads predicting future reward, question cost, and turn cost, respectively. The secondary multiplier $\lambda_2$ enforces a soft constraint on total turns, preventing degenerate behavior.
+
+\textbf{Dual update.} After each iteration, the Lagrange multipliers are updated via dual ascent:
+\begin{equation}
+  \lambda_1 \leftarrow \max\!\big(0,\; \lambda_1 + \eta_\lambda \cdot (\overline{C}_q - d_1)\big), \qquad
+  \lambda_2 \leftarrow \max\!\big(0,\; \lambda_2 + \eta_{\lambda'} \cdot (\overline{C}_t - d_2)\big).
+\end{equation}
+This eliminates the need for manual penalty tuning---the multiplier self-adjusts to satisfy the budget.
+
+\subsection{Base Model and Fine-Tuning}
+
+We fine-tune \textbf{Qwen2.5-Coder-7B-Instruct}~\citep{qwen2.5coder} using Low-Rank Adaptation (LoRA;~\citealt{hu2022lora}) with rank 16, targeting all attention and MLP projection layers. This preserves the model's pretrained coding ability while requiring only $\sim$25M trainable parameters (vs.\ 7B total). Gradient checkpointing reduces peak activation memory from $\sim$10\,GB to $\sim$3\,GB.
+
+\subsection{Environment}
+
+The environment implements a multi-turn dialogue loop:
+\begin{enumerate}[nosep]
+  \item The agent receives a \emph{degraded} coding problem (ambiguous, incomplete, or inconsistent).
+  \item At each turn, the agent chooses \texttt{[ASK]} or \texttt{[ANSWER]}.
+  \item If \texttt{[ASK]}: a user simulator (GPT-4o-mini with access to the full specification) answers the question.
+  \item If \texttt{[ANSWER]}: the submitted code is executed in a sandboxed subprocess against hidden test cases, and the episode terminates with reward $= \texttt{pass@1}$.
+  \item Episodes are capped at 6 turns.
+\end{enumerate}
+
+\textbf{Constrained prefix decoding} forces every generation to begin with a valid \texttt{[ASK]} or \texttt{[ANSWER]} prefix (chosen by comparing log-probabilities), eliminating malformed outputs.
+
+% ============================================================
+\section{Dataset}
+% ============================================================
+
+We use \textbf{HumanEvalComm}~\citep{zheng2024humanevalcomm}, which extends the 164 HumanEval problems~\citep{chen2021codex} with systematically degraded specifications across three dimensions:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Degradation} & \textbf{Type} & \textbf{Example} \\
+\midrule
+Ambiguity (\texttt{1a}) & Specific values $\to$ vague terms & ``by 1'' $\to$ ``by a number'' \\
+Incompleteness (\texttt{1p}) & Examples/details stripped & 48\% smaller on average \\
+Inconsistency (\texttt{1c}) & Examples contradict description & Conflicting I/O pairs \\
+\bottomrule
+\end{tabular}
+\caption{Single-type degradations; combinations (\texttt{2ac}, \texttt{2ap}, \texttt{2cp}, \texttt{3acp}) are also included.}
+\label{tab:degradation}
+\end{table}
+
+This yields 771 degraded problem variants total. We use a stratified train/eval split (ensuring all 7 degradation types appear in both sets).
+
+% ============================================================
+\section{Experimental Plan}
+% ============================================================
+
+\subsection{Training Setup}
+
+\begin{itemize}[nosep]
+  \item \textbf{Hardware}: 2$\times$ NVIDIA A100-40GB on NYU HPC (GPU\,0: training; GPU\,1: rollout inference + reference model).
+  \item \textbf{Rollout}: 256 episodes per iteration, collected in parallel.
+  \item \textbf{PPO}: 4 epochs, mini-batch size 16, clip $\epsilon = 0.2$, KL penalty coefficient 0.05.
+  \item \textbf{Training}: 80 iterations per budget setting ($\sim$11 hours each); 6 budget settings total.
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+
+\begin{itemize}[nosep]
+  \item \textbf{pass@1}: fraction of held-out problems solved (greedy decoding, temperature $= 0$).
+  \item \textbf{Average questions asked}: measures constraint satisfaction.
+  \item \textbf{Pareto frontier}: plot pass@1 vs.\ average questions across $d_1 \in \{0, 1, 2, 3, 4, 5\}$.
+\end{itemize}
+
+\subsection{Baselines}
+
+\begin{enumerate}[nosep]
+  \item \textbf{Zero-shot (no RL)}: Qwen2.5-Coder-7B on degraded specs, no clarification.
+  \item \textbf{Always-ask heuristic}: Ask one fixed question (``Can you clarify the specification?'') before answering.
+  \item \textbf{Unconstrained PPO}: PPO without the Lagrangian budget (no question penalty).
+\end{enumerate}
+
+\subsection{Expected Results}
+
+We hypothesize that:
+\begin{enumerate}[nosep]
+  \item The $d_1 = 1$ policy will outperform $d_1 = 0$ and the zero-shot baseline, demonstrating that strategic clarification improves code quality.
+  \item The Lagrangian multiplier will converge to enforce the budget, with $\overline{C}_q \approx d_1$ at convergence.
+  \item The trained policy will learn to selectively ask questions on genuinely ambiguous problems while answering clear ones directly, outperforming the always-ask heuristic.
+\end{enumerate}
+
+% ============================================================
+\section{Timeline}
+% ============================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Week} & \textbf{Milestone} \\
+\midrule
+Weeks 1--2 & Environment, dataset pipeline, code executor (complete) \\
+Weeks 3--4 & PPO-Lagrangian trainer, value heads, rollout collection (complete) \\
+Weeks 5--6 & Training runs ($d_1 = 0, 1$ first, then $d_1 = 2, 3, 4, 5$), hyperparameter tuning \\
+Weeks 7--8 & Evaluation, baseline comparisons, Pareto frontier analysis \\
+Weeks 9--10 & Final report and presentation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Related Work}
+% ============================================================
+
+\textbf{RL for LLMs.} RLHF~\citep{ouyang2022training} and PPO have been widely used to align LLMs with human preferences. Our work extends this to \emph{constrained} RL, where the policy must satisfy an explicit budget.
+
+\textbf{Constrained RL.} The Lagrangian approach to CMDPs~\citep{altman1999constrained, tessler2018reward} has been applied to safe RL but rarely to language agents. We adapt it to control the cost of information-seeking behavior.
+
+\textbf{Clarification in dialogue.} Prior work on asking clarifying questions in dialogue~\citep{rao2018learning, aliannejadi2019asking} typically uses supervised learning. We instead use RL with a budget constraint, allowing the agent to learn \emph{when} to ask from reward signal alone.
+
+\textbf{Code generation with feedback.} Recent work explores multi-turn code generation~\citep{zheng2024humanevalcomm}, but typically without RL-based optimization of the asking strategy. Our constrained formulation explicitly optimizes the ask-vs-answer tradeoff.
+
+% ============================================================
+% References
+% ============================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{99}
+\small
+
+\bibitem[Altman(1999)]{altman1999constrained}
+E.~Altman. \emph{Constrained Markov Decision Processes}. Chapman \& Hall/CRC, 1999.
+
+\bibitem[Aliannejadi et~al.(2019)]{aliannejadi2019asking}
+M.~Aliannejadi, H.~Zamani, F.~Crestani, and W.~B. Croft. Asking clarifying questions in open-domain information-seeking conversations. In \emph{SIGIR}, 2019.
+
+\bibitem[Austin et~al.(2021)]{austin2021mbpp}
+J.~Austin, A.~Odena, M.~Nye, M.~Bosma, H.~Michalewski, D.~Dohan, E.~Jiang, C.~Cai, M.~Terry, Q.~Le, and C.~Sutton. Program synthesis with large language models. \emph{arXiv:2108.07732}, 2021.
+
+\bibitem[Chen et~al.(2021)]{chen2021codex}
+M.~Chen, J.~Tworek, H.~Jun, Q.~Yuan, H.~P. de~Oliveira~Pinto, J.~Kaplan, H.~Edwards, Y.~Burda, N.~Joseph, G.~Brockman, et~al. Evaluating large language models trained on code. \emph{arXiv:2107.03374}, 2021.
+
+\bibitem[Hu et~al.(2022)]{hu2022lora}
+E.~J. Hu, Y.~Shen, P.~Wallis, Z.~Allen-Zhu, Y.~Li, S.~Wang, L.~Wang, and W.~Chen. {LoRA}: Low-rank adaptation of large language models. In \emph{ICLR}, 2022.
+
+\bibitem[Ouyang et~al.(2022)]{ouyang2022training}
+L.~Ouyang, J.~Wu, X.~Jiang, D.~Almeida, C.~Wainwright, P.~Mishkin, C.~Zhang, S.~Agarwal, K.~Slama, A.~Ray, et~al. Training language models to follow instructions with human feedback. In \emph{NeurIPS}, 2022.
+
+\bibitem[Qwen Team(2024)]{qwen2.5coder}
+Qwen Team. Qwen2.5-Coder technical report. \emph{arXiv:2409.12186}, 2024.
+
+\bibitem[Rao and Daum{\'e}~III(2018)]{rao2018learning}
+S.~Rao and H.~Daum{\'e}~III. Learning to ask good questions: Ranking clarification questions using neural expected value of perfect information. In \emph{ACL}, 2018.
+
+\bibitem[Schulman et~al.(2015)]{schulman2015gae}
+J.~Schulman, P.~Moritz, S.~Levine, M.~Jordan, and P.~Abbeel. High-dimensional continuous control using generalized advantage estimation. In \emph{ICLR}, 2016.
+
+\bibitem[Schulman et~al.(2017)]{schulman2017ppo}
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov. Proximal policy optimization algorithms. \emph{arXiv:1707.06347}, 2017.
+
+\bibitem[Stooke et~al.(2020)]{stooke2020responsive}
+A.~Stooke, J.~Achiam, and P.~Abbeel. Responsive safety in reinforcement learning by {PID} {L}agrangian methods. In \emph{ICML}, 2020.
+
+\bibitem[Tessler et~al.(2018)]{tessler2018reward}
+C.~Tessler, D.~J. Mankowitz, and S.~Mannor. Reward constrained policy optimization. In \emph{ICLR}, 2019.
+
+\bibitem[Zheng et~al.(2024)]{zheng2024humanevalcomm}
+J.~Zheng, S.~Pea, and J.~Wu. {HumanEvalComm}: Evaluating {LLMs}' communicative competence in code generation. \emph{arXiv:2406.04737}, 2024.
+
+\end{thebibliography}
+
+\end{document}
