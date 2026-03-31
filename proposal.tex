@@ -58,7 +58,7 @@ The objective is to find a policy $\pi^*$ that maximizes expected reward subject
   \label{eq:cmdp}
 \end{equation}
 
-By sweeping $d_1 \in \{0, 1\}$, we compare a ``never ask'' policy against one that may ask at most one question on average. The Lagrangian automatically learns the appropriate penalty $\lambda_1$ to satisfy the budget constraint.
+By sweeping $d_1 \in \{0, 1, 2, 3, 4, 5\}$, we trace a \textbf{Pareto frontier} of optimal policies, from ``never ask'' to ``ask freely.'' The Lagrangian automatically learns the appropriate penalty $\lambda_1$ for each budget level.
 
 % ============================================================
 \section{Approach}
