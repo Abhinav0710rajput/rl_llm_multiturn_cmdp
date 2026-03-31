@@ -97,9 +97,6 @@ class ClarificationEnv:
         self.tokenizer = tokenizer
         self.simulator = UserSimulator(cfg)
         self.executor = CodeExecutor(cfg)
-        self.efficiency_alpha = getattr(cfg.environment, "efficiency_alpha", 0.0)
-        self.efficiency_beta = getattr(cfg.environment, "efficiency_beta", 0.0)
-        self.question_budget = getattr(cfg.constraint, "d1", 1)
 
     def reset(self, problem: Problem) -> EnvState:
         """Start a new episode with the given problem."""
@@ -177,11 +174,7 @@ class ClarificationEnv:
                 context=context,
             )
 
-            # Efficiency bonus: small reward for using fewer turns / questions
-            turn_bonus = self.efficiency_alpha * (1 - turn_count / self.max_turns)
-            q_ratio = state.question_count / max(self.question_budget, 1)
-            question_bonus = self.efficiency_beta * max(1 - q_ratio, 0.0)
-            reward = pass_rate + turn_bonus + question_bonus
+            reward = pass_rate
 
             next_state = EnvState(
                 problem=state.problem,
@@ -201,7 +194,6 @@ class ClarificationEnv:
                     "action_type": "answer",
                     "code": code,
                     "pass_rate": pass_rate,
-                    "efficiency_bonus": turn_bonus + question_bonus,
                 },
             )
 

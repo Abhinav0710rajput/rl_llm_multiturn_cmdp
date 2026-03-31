@@ -217,13 +217,12 @@ assert incr_list([-1, 0, 1]) == [0, 1, 2]  # PASS
 
 **Turn 2 — Transition recorded:**
 ```
-reward  = 1.046 (3/3 tests passed → pass@1 = 1.0 + efficiency bonus ≈ 0.046)
+reward  = 1.0   (3/3 tests passed → pass@1 = 1.0)
 cost_q  = 0.0   (no question asked)
 cost_t  = 1.0   (used a turn)
 done    = True
 ```
 
-Note: The efficiency bonus = α·(1 - turns/max_turns) + β·(1 - questions/d₁) rewards shorter episodes and fewer questions. With α=β=0.025, max_turns=6, d₁=2, turn_count=2, question_count=1: bonus = 0.025·(1-2/6) + 0.025·(1-1/2) = 0.0167 + 0.0125 = 0.029. This is a small tiebreaker that discourages unnecessary turns/questions within the budget.
 
 ---
 
@@ -240,7 +239,7 @@ Note: The efficiency bonus = α·(1 - turns/max_turns) + β·(1 - questions/d₁
 **Reward & Constraint Formulation:**
 
 ```
-Episode return (reward):     R = 1.029       (pass@1 + efficiency bonus)
+Episode return (reward):     R = 1.0         (pass@1)
 Episode cost (questions):    C_q = 1.0       (1 question asked)
 Episode cost (turns):        C_t = 2.0       (2 turns used)
 
@@ -406,4 +405,41 @@ constraint accordingly?
   The alternative (truncation + single-question enforcement) is simpler and noiseless, but it constrains the agent's action space in a way that's
   slightly artificial. Your proposed approach lets the agent naturally discover that batching questions is expensive, which is a more interesting
   emergent behavior to study.
+
+
+## Future Direction: Dynamic Budget via Learned Ambiguity Assessment
+
+Currently `d1` is a static global constant — the agent has the same average question budget regardless of how degraded the spec is. A natural extension is to let the agent allocate its budget dynamically based on how ambiguous each spec is. Three approaches, from simplest to most ambitious:
+
+### Approach A: Per-variant fixed budgets (no model changes)
+
+Hand-assign budgets per degradation type:
+```python
+budget_map = {"1a": 0.5, "1c": 0.5, "1p": 2, "2ac": 1, "2ap": 2, "2cp": 2, "3acp": 3}
+```
+The dual update computes violation relative to the per-variant budget. Easy to implement but the agent doesn't learn to assess ambiguity — it's told the difficulty.
+
+### Approach B: Learned budget head (explicit predictor)
+
+Add a small MLP head on the same hidden state the value heads use:
+```
+budget_head: hidden_state → predicted_d1 (scalar)
+```
+Train it with a self-supervised signal: for solved episodes (pass@1 > 0.5), the actual number of questions asked is a reasonable target. The per-episode constraint becomes `questions_asked ≤ budget_head(state)`. Adds a chicken-and-egg problem early in training since the budget head is random.
+
+### Approach C: Implicit dynamic budget (what we already have)
+
+**Key insight:** with a global `d1=1` across all variants, the agent is already learning a dynamic budget implicitly. The policy reads the degraded spec through Qwen's full language understanding and outputs `P([ASK])` vs `P([ANSWER])`. That probability IS the model's learned ambiguity estimate. The Lagrangian doesn't constrain individual episodes — it constrains the expectation. So the agent is free to ask 0 questions on easy specs (`1a`, `1c`) and 2 on hard ones (`1p`), as long as the average stays ≤ 1.
+
+The difference from a "true" dynamic budget is that the agent is constrained by what else is in the batch. If you sampled all `3acp` problems, the agent can't ask 3 each — it's still pulled toward the global average.
+
+### Analysis for the paper
+
+To tell this story without building anything new, analyze the trained policy's behavior:
+- Plot `P([ASK])` vs degradation type — this is an empirical ambiguity detector
+- Show that the agent asks more on `1p`/`3acp` and skips on `1a`/`1c` — emergent budget allocation
+- Compare pass@1 breakdown by variant between constrained (`d1=1`) and unconstrained (no Lagrangian) agents
+- Run an ablation: at inference time, remove the constraint and let the agent ask freely on hard variants — does pass@1 on `3acp` improve? That gap measures the cost of a tight global budget
+
+If the emergent allocation result is strong, Approach C is the most compelling story: the agent learns when to ask without being told problem difficulty. If it's weak (agent just never asks or always asks), then Approach A or B would be the next step.
 

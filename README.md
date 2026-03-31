@@ -320,7 +320,7 @@ Each **iteration** consists of:
 
 1. **Rollout collection** (~5–6 min): 256 episodes run in parallel. The agent sees a degraded problem spec, generates `[ASK]` or `[ANSWER]` actions, and the environment responds. API calls to GPT-4o-mini happen asynchronously. Code execution happens in a subprocess sandbox.
 
-2. **Advantage computation**: GAE advantages are computed for three return streams: reward (pass@1 + efficiency bonus), question cost, and turn cost.
+2. **Advantage computation**: GAE advantages are computed for three return streams: reward (pass@1), question cost, and turn cost.
 
 3. **PPO update** (~3 min): 4 epochs over the buffer in mini-batches of 16. The Lagrangian advantage `A_lag = A_reward - λ₁·A_q - λ₂·A_t` is used. Only LoRA weights are updated.
 
@@ -573,8 +573,7 @@ The simulator's system prompt tells GPT-4o-mini to treat any function name the a
 **Why partial credit for code evaluation?**
 Binary pass/fail gives a flat reward landscape. Partial credit (fraction of assertions passing) gives smoother gradients — an agent that gets 8/10 tests right receives reward 0.8, not 0. This significantly stabilises PPO training.
 
-**Why the efficiency bonus?**
-With γ=1.0 and Lagrange multipliers at zero (agent is under budget), asking a useless question has zero cost in the objective — the reward is the same whether the agent wastes a turn or not. The efficiency bonus adds a small tiebreaker: `reward = pass@1 + α·(1 - turns/max_turns) + β·(1 - questions/d₁)`. With α=β=0.025, the max combined bonus is ~0.046, which is too small to outweigh a genuine pass@1 improvement from a useful question, but enough to consistently discourage waste when the outcome is unchanged. The Lagrangian handles the budget constraint; the efficiency bonus handles within-budget waste — they address different problems and don't interfere with each other.
+
 
 **Why a stratified train/eval split?**
 Rare degradation types (`prompt3acp` = 12 problems, `prompt2cp` = 35 problems) could end up entirely in one set with a random split. The stratified split groups problems by their rarest variant and splits each group proportionally, guaranteeing all 7 types appear in both sets.

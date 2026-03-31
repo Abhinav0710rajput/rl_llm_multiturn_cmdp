@@ -69,7 +69,7 @@ This gives ~762 total variants, but only 164 truly independent problems (variant
 
 **Component 2 — User Simulator (GPT-4o-mini API call, NOT trained):** An LLM that holds the original spec S\* and answers the agent's questions. It only reveals what is specifically asked — it doesn't volunteer extra info.
 
-**Component 3 — Code Executor (Python sandbox, NOT trained):** Runs the agent's generated code against the test suite. Returns pass@1 (fraction of tests that pass). The environment adds a small efficiency bonus to the reward based on turns and questions used (see below).
+**Component 3 — Code Executor (Python sandbox, NOT trained):** Runs the agent's generated code against the test suite. Returns pass@1 (fraction of tests that pass).
 
 **The Agent — Qwen2.5-Coder-7B-Instruct with LoRA adapters (THIS is what we train):** Takes in the degraded spec + conversation history, outputs either a clarifying question or code. Constrained prefix decoding ensures every output starts with `[ASK]` or `[ANSWER]`.
 
@@ -123,9 +123,9 @@ def incr_list(l: list):
 
 **Turn 2 — Code executor runs tests:** All 3 tests pass.
 
-**Turn 2 — We record:** reward = 1.0 + efficiency bonus (pass@1 + small bonus for using fewer turns/questions), cost c₁ = 0, cost c₂ = 1
+**Turn 2 — We record:** reward = 1.0 (pass@1), cost c₁ = 0, cost c₂ = 1
 
-**Episode A totals:** reward ≈ 1.03, questions asked = 1, turns = 2
+**Episode A totals:** reward = 1.0, questions asked = 1, turns = 2
 
 ---
 
@@ -141,7 +141,7 @@ def incr_list(l: list):
 
 **Turn 1 — Code executor:** 2 of 3 tests fail.
 
-**Episode B totals:** reward ≈ 0.38 (0.33 pass@1 + efficiency bonus for 1 turn, 0 questions), questions asked = 0, turns = 1
+**Episode B totals:** reward = 0.33 (pass@1), questions asked = 0, turns = 1
 
 ---
 
@@ -151,9 +151,9 @@ def incr_list(l: list):
 
 **Turn 2 — Agent:** `[ASK] What should the output be for [1, 2, 3]?` **Simulator:** "[2, 3, 4]." (Now the agent can infer increment = 1, but it took 2 questions) **Record:** reward = 0, c₁ = 1, c₂ = 1
 
-**Turn 3 — Agent:** `[ANSWER] return [x + 1 for x in l]` — all tests pass. **Record:** reward ≈ 1.01 (1.0 + small efficiency bonus), c₁ = 0, c₂ = 1
+**Turn 3 — Agent:** `[ANSWER] return [x + 1 for x in l]` — all tests pass. **Record:** reward = 1.0 (pass@1), c₁ = 0, c₂ = 1
 
-**Episode C totals:** reward ≈ 1.01, questions asked = 2, turns = 3
+**Episode C totals:** reward = 1.0, questions asked = 2, turns = 3
 
 ### 4.3 How PPO-Lagrangian Learns From These Episodes
 
@@ -169,7 +169,7 @@ A_lagrangian = A_reward - λ₁ × A_cost1 - λ₂ × A_cost2
 
 In Episode A, the ASK at Turn 1 has positive reward advantage (it led to correct code) but also positive cost advantage (it costs 1 question). If λ₁ is small, the reward gain dominates → action is reinforced. If λ₁ is large, the cost dominates → action is discouraged.
 
-In Episode C, the first ASK ("give me an example") has zero reward advantage — it didn't help produce the answer. But it costs 1 unit. So its Lagrangian advantage is negative. The policy learns this was a bad question. Additionally, Episode C's extra turns and questions reduce its efficiency bonus compared to Episode A (same pass@1 but lower total reward), providing a within-budget signal against waste.
+In Episode C, the first ASK ("give me an example") has zero reward advantage — it didn't help produce the answer. But it costs 1 unit. So its Lagrangian advantage is negative. The policy learns this was a bad question.
 
 **Step 2 — PPO weight update.**
 
