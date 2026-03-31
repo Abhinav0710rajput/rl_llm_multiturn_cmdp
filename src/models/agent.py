@@ -169,32 +169,38 @@ class Agent:
             return action_text, action_ids, action_logp, last_hidden
 
         # ── Constrained prefix selection ─────────────────────────────────
-        # Use the prompt's last-position logits to score the first token of
-        # each prefix, then continue autoregressively for remaining tokens.
-        prompt_logits = outputs.logits[0, -1, :]  # logits predicting first token after prompt
+        # Use the prompt's logits to cheaply score the first token of each
+        # prefix, then sample which prefix to use. This avoids expensive
+        # full forward passes just to score the prefix.
+        prompt_logits = outputs.logits[0, -1, :]
+        log_probs = F.log_softmax(prompt_logits, dim=-1)
 
-        ask_logp = _score_prefix(
-            model, enc.input_ids, prompt_logits, self._ask_ids, device
-        )
-        ans_logp = _score_prefix(
-            model, enc.input_ids, prompt_logits, self._answer_ids, device
-        )
+        # Score first token of each prefix (cheap — just a lookup)
+        ask_score = log_probs[self._ask_ids[0]].item()
+        ans_score = log_probs[self._answer_ids[0]].item()
 
-        # Sample prefix proportional to exp(avg logp) — normalize by length
-        # to avoid systematically favoring the shorter prefix
-        logps = torch.tensor([ask_logp / len(self._ask_ids),
-                              ans_logp / len(self._answer_ids)])
-        probs = torch.softmax(logps / self.rollout_temperature, dim=0)
+        # If first tokens are the same (e.g., both start with '['),
+        # use the KV cache to score the second token too
+        if self._ask_ids[0] == self._answer_ids[0] and len(self._ask_ids) > 1 and len(self._answer_ids) > 1:
+            first_tok = torch.tensor([[self._ask_ids[0]]], device=device)
+            with torch.no_grad():
+                out2 = model(input_ids=first_tok, past_key_values=outputs.past_key_values, use_cache=True)
+            lp2 = F.log_softmax(out2.logits[0, -1, :], dim=-1)
+            ask_score += lp2[self._ask_ids[1]].item()
+            ans_score += lp2[self._answer_ids[1]].item()
+
+        probs = torch.softmax(
+            torch.tensor([ask_score, ans_score]) / self.rollout_temperature, dim=0
+        )
         choice = torch.multinomial(probs, 1).item()
 
         if choice == 0:
             prefix_ids = self._ask_ids
-            prefix_logp = ask_logp
         else:
             prefix_ids = self._answer_ids
-            prefix_logp = ans_logp
 
         # ── Generate continuation after the prefix ───────────────────────
+        # Re-encode prompt + prefix (model.generate handles its own KV cache)
         prefix_tensor = torch.tensor([prefix_ids], device=device)
         full_input = torch.cat([enc.input_ids, prefix_tensor], dim=1)
         full_mask = torch.ones_like(full_input)
@@ -215,7 +221,9 @@ class Agent:
         action_ids = prefix_ids + continuation_ids
         action_text = self.tokenizer.decode(action_ids, skip_special_tokens=True).strip()
 
-        # Total log-prob = prefix log-prob + continuation log-prob
+        # Log-prob: prefix scored from prompt logits (approximate — uses
+        # first 1-2 tokens only), continuation scored from generate() output
+        prefix_logp = ask_score if choice == 0 else ans_score
         continuation_logp = _compute_action_logp(gen_out.scores, continuation_ids)
         action_logp = prefix_logp + continuation_logp
 
@@ -297,42 +305,6 @@ class Agent:
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
-def _score_prefix(
-    model,
-    prompt_ids: torch.Tensor,
-    prompt_logits: torch.Tensor,
-    prefix_ids: List[int],
-    device: torch.device,
-) -> float:
-    """
-    Score a fixed prefix given the prompt.
-
-    Uses the prompt's last-position logits for the first prefix token,
-    then does a single forward pass of prompt + prefix to score the rest.
-    """
-    total_logp = 0.0
-
-    # Score first prefix token using the prompt's last logits
-    log_probs = F.log_softmax(prompt_logits, dim=-1)
-    total_logp += log_probs[prefix_ids[0]].item()
-
-    if len(prefix_ids) == 1:
-        return total_logp
-
-    # Score remaining prefix tokens with a clean forward pass
-    # (prompt + prefix so far) — no KV cache reuse to avoid misalignment
-    prefix_tensor = torch.tensor([prefix_ids], device=device)
-    full_input = torch.cat([prompt_ids, prefix_tensor], dim=1)
-    with torch.no_grad():
-        out = model(input_ids=full_input, use_cache=False)
-    # out.logits[:, prompt_len-1+i, :] predicts prefix token i
-    prompt_len = prompt_ids.shape[1]
-    for i in range(1, len(prefix_ids)):
-        logits = out.logits[0, prompt_len - 1 + i, :]
-        lp = F.log_softmax(logits, dim=-1)
-        total_logp += lp[prefix_ids[i]].item()
-
-    return total_logp
 
 
 def _compute_action_logp(scores, action_ids: List[int]) -> float:
