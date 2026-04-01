@@ -4,6 +4,30 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 
 ---
 
+## Current Status (2026-04-01)
+
+**Phase: Training sanity check (in progress)**
+
+Completed:
+- Pipeline validated end-to-end (smoke tests with Llama 3B, 8B, and Qwen 7B)
+- Switched from Llama-3.1-8B to Qwen2.5-Coder-7B (stronger coding baseline)
+- Baseline eval shows Qwen scores ~40-80% on degraded specs without training (3 runs, 10 problems each)
+- Early baseline numbers are deflated due to executor bugs that have since been fixed:
+  - String outputs were unquoted in test assertions (correct code scored 0)
+  - Function name mismatch (agent wrote `candidate`, tests called original name)
+  - Helper functions (e.g., `poly`) missing from test programs
+  - Template test relations (`$demo$`, `$input$`) not expanded
+- Baseline needs re-running with fixed code to get accurate numbers
+- Training sanity check (3 iterations, 16 episodes) is being debugged — prior runs timed out due to KV cache being disabled during generation (gradient checkpointing conflict). Fix applied, awaiting results.
+
+Next steps:
+1. Get training sanity check to complete successfully
+2. Re-run baseline eval with all fixes
+3. Full training: d1=0 and d1=1 (80 iterations each, ~11 hours per setting)
+4. Evaluate and compare trained policies
+
+---
+
 ## Table of Contents
 
 1. [What This Project Does](#1-what-this-project-does)
