@@ -99,6 +99,11 @@ class Agent:
                 bias="none",
             )
             self._rollout_model = get_peft_model(base1, lora_cfg)
+            # Ensure no gradient checkpointing on rollout model (critical for KV cache speed)
+            if hasattr(self._rollout_model, 'gradient_checkpointing_disable'):
+                self._rollout_model.gradient_checkpointing_disable()
+            self._rollout_model.config.use_cache = True
+            print(f"  Rollout model: gradient_checkpointing={getattr(self._rollout_model, 'is_gradient_checkpointing', False)}, use_cache={self._rollout_model.config.use_cache}")
 
         # Copy LoRA weights from policy (GPU 0) to rollout model (GPU 1)
         policy_state = {
@@ -132,9 +137,11 @@ class Agent:
         model.eval()
         device = self.rollout_device if self._rollout_model else self.train_device
 
-        # Ensure KV cache is enabled (critical for generation speed)
-        if hasattr(model.config, 'use_cache'):
-            model.config.use_cache = True
+        # Ensure KV cache is enabled and gradient checkpointing is off
+        # (critical for generation speed — without cache, generation is O(n²))
+        if hasattr(model, 'gradient_checkpointing_disable'):
+            model.gradient_checkpointing_disable()
+        model.config.use_cache = True
 
         enc = self.tokenizer(
             prompt,
