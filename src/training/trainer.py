@@ -130,9 +130,9 @@ class PPOLagrangianTrainer:
                     print(f"\n  --- Episode: {ep.problem_id} ---")
                     for t in ep.transitions:
                         action_type = t.info.get("action_type", "?")
-                        print(f"    Turn {t.turn}: [{action_type.upper()}] {t.action_text}")
+                        print(f"    Turn {t.turn}: [{action_type.upper()}] {t.action_text[:200]}")
                         if action_type == "ask":
-                            print(f"      Simulator: {t.info.get('answer', '')}")
+                            print(f"      Simulator: {t.info.get('answer', '')[:200]}")
                             print(f"      Atomic questions: {t.info.get('atomic_count', '?')}")
                         elif action_type == "answer":
                             print(f"      pass@1: {t.info.get('pass_rate', 0.0):.2f}")
