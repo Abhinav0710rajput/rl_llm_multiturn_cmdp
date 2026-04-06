@@ -133,12 +133,19 @@ def compute_value_loss(
 def compute_kl_penalty(
     new_log_probs: torch.Tensor,
     ref_log_probs: torch.Tensor,
+    action_lengths: torch.Tensor = None,
 ) -> torch.Tensor:
     """
-    Per-sample KL divergence: KL(π || π_ref) ≈ new_logp - ref_logp.
+    Per-token KL divergence: KL(π || π_ref) ≈ (new_logp - ref_logp) / n_tokens.
+    Normalizing by sequence length prevents longer actions from being
+    penalized more heavily than shorter ones.
     Returns mean over the batch.
     """
-    return (new_log_probs - ref_log_probs).mean()
+    kl_per_seq = new_log_probs - ref_log_probs  # (B,)
+    if action_lengths is not None:
+        kl_per_token = kl_per_seq / action_lengths.clamp(min=1).float()
+        return kl_per_token.mean()
+    return kl_per_seq.mean()
 
 
 def compute_entropy_bonus(

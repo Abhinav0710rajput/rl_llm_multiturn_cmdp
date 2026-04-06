@@ -265,8 +265,12 @@ class PPOLagrangianTrainer:
             v_r, v_q, v_t, ret_r, ret_q, ret_t, self.device
         )
 
-        # KL penalty
-        kl = compute_kl_penalty(new_log_probs, ref_log_probs)
+        # KL penalty (per-token to avoid penalizing long actions disproportionately)
+        action_lengths = torch.tensor(
+            [len(t.action_ids) for t in transitions],
+            dtype=torch.float32, device=self.device
+        )
+        kl = compute_kl_penalty(new_log_probs, ref_log_probs, action_lengths)
 
         # Entropy bonus
         entropy = compute_entropy_bonus(new_log_probs)
