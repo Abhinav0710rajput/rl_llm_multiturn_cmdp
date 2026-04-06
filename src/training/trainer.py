@@ -300,14 +300,18 @@ class PPOLagrangianTrainer:
 
     # ── Eval ─────────────────────────────────────────────────────────────────
 
-    def _run_eval(self):
+    def _run_eval(self, max_eval_problems: int = 50):
         from src.evaluation.evaluator import evaluate_policy
-        print(f"\n[Eval] iteration={self.iteration}")
+        # Sample a subset for mid-training eval (full eval at the end)
+        eval_subset = self.eval_problems
+        if len(self.eval_problems) > max_eval_problems:
+            eval_subset = self.rng.sample(self.eval_problems, max_eval_problems)
+        print(f"\n[Eval] iteration={self.iteration} ({len(eval_subset)} problems)")
         results = asyncio.run(
             evaluate_policy(
                 agent=self.agent,
                 env=self.env,
-                problems=self.eval_problems,
+                problems=eval_subset,
                 rng=self.rng,
             )
         )
