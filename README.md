@@ -2,6 +2,8 @@
 
 This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. The interaction is framed as a **Constrained Markov Decision Process (CMDP)**, where the agent must maximise code correctness while satisfying a hard constraint on average question count. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
+**Contributors:** [Abhinav Rajput](https://github.com/Abhinav0710rajput) · [Acey Vogelstein](https://github.com/acv1229) · [Deepali Balakrishna Ksheersagar](https://github.com/Deepali-BK)
+
 **Trained checkpoints on Hugging Face:**
 
 [![d1=0](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0) `d1=0`  
@@ -21,10 +23,9 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 7. [System Prompts](#7-system-prompts)
 8. [Training](#8-training)
 9. [Evaluation](#9-evaluation)
-10. [Contributors](#10-contributors)
-11. [Trained Model Checkpoints](#11-trained-model-checkpoints)
-12. [Configuration Reference](#12-configuration-reference)
-13. [Key Design Decisions](#13-key-design-decisions)
+10. [Trained Model Checkpoints](#10-trained-model-checkpoints)
+11. [Configuration Reference](#11-configuration-reference)
+12. [Key Design Decisions](#12-key-design-decisions)
 
 ---
 
@@ -415,15 +416,7 @@ Each sweep:
 
 ---
 
-## 10. Contributors
-
-- [Abhinav Rajput](https://github.com/Abhinav0710rajput)
-- [Acey Vogelstein](https://github.com/acv1229)
-- [Deepali Balakrishna Ksheersagar](https://github.com/Deepali-BK)
-
----
-
-## 11. Trained Model Checkpoints
+## 10. Trained Model Checkpoints
 
 ### Hugging Face
 
@@ -488,7 +481,7 @@ print(action_text)  # "[ASK] What number should each element be incremented by?"
 
 ---
 
-## 12. Configuration Reference
+## 11. Configuration Reference
 
 All configuration lives in `configs/default.yaml`. Every value can be overridden at the command line using OmegaConf dot-notation (e.g., `training.n_iterations=40`).
 
@@ -600,7 +593,7 @@ data:
 
 ---
 
-## 13. Key Design Decisions
+## 12. Key Design Decisions
 
 **Why Qwen2.5-Coder-7B and not Llama-3.1-8B?**
 The HumanEvalComm paper shows that code-specialized models (CodeQwen, DeepSeek Coder) significantly outperform general-purpose models on degraded specs. Qwen2.5-Coder-7B scores ~70% on standard HumanEval vs ~55% for Llama-3.1-8B. It's also similar size (~14GB bf16), same LoRA config, and not gated on HuggingFace. We verified that Llama-3.1-8B scored 0% on smoke test episodes; Qwen Coder provides a much stronger coding baseline for PPO to build on.
