@@ -16,22 +16,22 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 
 ## Table of Contents
 
-1. [What This Project Does](#1-what-this-project-does)
-2. [Hardware Requirements](#2-hardware-requirements)
-3. [Installation](#3-installation)
-4. [API Keys](#4-api-keys)
-5. [Project Structure](#5-project-structure)
-6. [Dataset](#6-dataset)
-7. [System Prompts](#7-system-prompts)
-8. [Training](#8-training)
-9. [Evaluation](#9-evaluation)
-10. [Trained Model Checkpoints](#10-trained-model-checkpoints)
-11. [Configuration Reference](#11-configuration-reference)
-12. [Key Design Decisions](#12-key-design-decisions)
+- [What This Project Does](#what-this-project-does)
+- [Hardware Requirements](#hardware-requirements)
+- [Installation](#installation)
+- [API Keys](#api-keys)
+- [Project Structure](#project-structure)
+- [Dataset](#dataset)
+- [System Prompts](#system-prompts)
+- [Training](#training)
+- [Evaluation](#evaluation)
+- [Trained Model Checkpoints](#trained-model-checkpoints)
+- [Configuration Reference](#configuration-reference)
+- [Key Design Decisions](#key-design-decisions)
 
 ---
 
-## 1. What This Project Does
+## What This Project Does
 
 When an LLM is given a vague coding task like *"Return list with elements incremented by a number"*, it can either:
 - **Guess** and write code (fast, but may be wrong)
@@ -49,7 +49,7 @@ The training algorithm is **PPO-Lagrangian**, where a Lagrange multiplier `λ₁
 
 ---
 
-## 2. Hardware Requirements
+## Hardware Requirements
 
 | Requirement | Minimum | Recommended |
 |---|---|---|
@@ -66,7 +66,7 @@ To change GPU assignment, edit `model.train_device` and `model.rollout_device` i
 
 ---
 
-## 3. Installation
+## Installation
 
 ```bash
 # Clone the repository
@@ -100,7 +100,7 @@ python -c "from transformers import AutoTokenizer, AutoModelForCausalLM; AutoTok
 
 ---
 
-## 4. API Keys
+## API Keys
 
 This project uses two external APIs:
 
@@ -130,7 +130,7 @@ Qwen2.5-Coder-7B-Instruct is not gated - no HuggingFace token is needed to downl
 
 ---
 
-## 5. Project Structure
+## Project Structure
 
 ```
 rl_llm_multiturn_project/
@@ -188,7 +188,7 @@ rl_llm_multiturn_project/
 
 ---
 
-## 6. Dataset
+## Dataset
 
 The dataset is **HumanEvalComm** - 164 Python coding problems from HumanEval, each with multiple degraded versions of the problem specification.
 
@@ -223,7 +223,7 @@ data:
 
 ---
 
-## 7. System Prompts
+## System Prompts
 
 There are two system prompts in this project. Both are defined in source code, not config files.
 
@@ -294,7 +294,7 @@ Switch between modes via `environment.multi_question_mode` in `configs/default.y
 
 ---
 
-## 8. Training
+## Training
 
 ### Quick Start
 
@@ -371,7 +371,7 @@ checkpoints/d1_1/iter_0079/log.json
 
 ---
 
-## 9. Evaluation
+## Evaluation
 
 ### Evaluate a Single Checkpoint
 
@@ -418,7 +418,7 @@ Each sweep:
 
 ---
 
-## 10. Trained Model Checkpoints
+## Trained Model Checkpoints
 
 ### Hugging Face
 
@@ -483,7 +483,7 @@ print(action_text)  # "[ASK] What number should each element be incremented by?"
 
 ---
 
-## 11. Configuration Reference
+## Configuration Reference
 
 All configuration lives in `configs/default.yaml`. Every value can be overridden at the command line using OmegaConf dot-notation (e.g., `training.n_iterations=40`).
 
@@ -595,7 +595,7 @@ data:
 
 ---
 
-## 12. Key Design Decisions
+## Key Design Decisions
 
 **Why Qwen2.5-Coder-7B and not Llama-3.1-8B?**
 The HumanEvalComm paper shows that code-specialized models (CodeQwen, DeepSeek Coder) significantly outperform general-purpose models on degraded specs. Qwen2.5-Coder-7B scores ~70% on standard HumanEval vs ~55% for Llama-3.1-8B. It's also similar size (~14GB bf16), same LoRA config, and not gated on HuggingFace. We verified that Llama-3.1-8B scored 0% on smoke test episodes; Qwen Coder provides a much stronger coding baseline for PPO to build on.
