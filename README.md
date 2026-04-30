@@ -2,6 +2,12 @@
 
 This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
+**Trained checkpoints on Hugging Face:**
+
+[![d1=0](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0) `d1=0`  
+[![d1=0.5](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0p5) `d1=0.5`  
+[![d1=1](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-1) `d1=1`
+
 ---
 
 ## Table of Contents
@@ -410,7 +416,15 @@ Each sweep:
 
 ## 10. Trained Model Checkpoints
 
-### Location
+### Hugging Face
+
+| Budget | Model | Description |
+|--------|-------|-------------|
+| `d1=0` | [![](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0) | Never asks - guesses from degraded spec alone |
+| `d1=0.5` | [![](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0p5) | Asks sparingly - at most 0.5 questions on average |
+| `d1=1` | [![](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-1) | Asks when worth it - at most 1 question on average |
+
+### Local Checkpoints
 
 All checkpoints are saved under `checkpoints/` (gitignored):
 
