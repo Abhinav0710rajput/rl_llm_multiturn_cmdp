@@ -1,5 +1,9 @@
 # Constrained Clarification: Training LLM Agents to Ask Better Questions Under Budget Constraints
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
+![PyTorch 2.3+](https://img.shields.io/badge/PyTorch-2.3+-red.svg)
+
 This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. The interaction is framed as a **Constrained Markov Decision Process (CMDP)**, where the agent must maximise code correctness while satisfying a hard constraint on average question count. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
 **Contributors:** [Abhinav Rajput](https://github.com/Abhinav0710rajput) · [Acey Vogelstein](https://github.com/acv1229) · [Deepali Balakrishna Ksheersagar](https://github.com/Deepali-BK)
