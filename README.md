@@ -4,6 +4,8 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 
 **Contributors:** [Abhinav Rajput](https://github.com/Abhinav0710rajput) · [Acey Vogelstein](https://github.com/acv1229) · [Deepali Balakrishna Ksheersagar](https://github.com/Deepali-BK)
 
+**NYU Center for Data Science**
+
 **Trained checkpoints on Hugging Face:**
 
 [![d1=0](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0) `d1=0`  
