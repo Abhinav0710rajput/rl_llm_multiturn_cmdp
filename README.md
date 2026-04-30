@@ -11,12 +11,6 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 
 **NYU Center for Data Science**
 
-**Trained checkpoints on Hugging Face:**
-
-[![d1=0](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0) `d1=0`  
-[![d1=0.5](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-0p5) `d1=0.5`  
-[![d1=1](https://huggingface.co/datasets/huggingface/badges/resolve/main/model-on-hf-sm.svg)](https://huggingface.co/acv1229/rl-clarify-orig-prompt-d1-1) `d1=1`
-
 ---
 
 ## Table of Contents
