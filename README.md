@@ -3,6 +3,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![PyTorch 2.3+](https://img.shields.io/badge/PyTorch-2.3+-red.svg)
+[![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-Models-orange)](https://huggingface.co/acv1229)
 
 This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. The interaction is framed as a **Constrained Markov Decision Process (CMDP)**, where the agent must maximise code correctness while satisfying a hard constraint on average question count. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
