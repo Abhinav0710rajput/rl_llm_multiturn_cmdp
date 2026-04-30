@@ -262,10 +262,20 @@ Counting rules for N:
 - Conjunctions like "and", "also", "additionally" between separate requests = separate questions.
 ```
 
-**Mode: `truncate`** - the simulator only sees the first question, `cost_q` is always 1:
+**Mode: `truncate`** - only the first question (up to the first `?`) is passed to the simulator, `cost_q` is always 1:
 ```
 You are a helpful assistant who holds the complete specification for a coding problem.
-Answer ONLY the single question below. Do not volunteer extra information.
+
+Full specification:
+{original_prompt}
+
+Note: The agent may refer to the function by a different name (e.g., "candidate").
+Treat any function name the agent uses as referring to the function described above.
+
+Rules:
+1. Answer ONLY the single question below. Do not volunteer extra information.
+2. Do not reveal test cases or the full solution.
+3. Keep your answer brief and factual.
 ```
 
 Switch between modes via `environment.multi_question_mode` in `configs/default.yaml`.
@@ -487,7 +497,7 @@ model:
 environment:
   max_turns: 6                               # Hard cap on conversation length
   max_new_tokens: 512                        # Max tokens per agent action
-  max_seq_len: 1536                          # Max total prompt length (tokens)
+  max_seq_len: 2048                          # Max total prompt length (tokens)
   rollout_temperature: 0.8                   # Exploration temperature during rollout
   multi_question_mode: count                 # "count" or "truncate" (see Section 7)
   efficiency_alpha: 0.025                    # Small bonus for fewer turns (tiebreaker vs waste)
@@ -501,27 +511,36 @@ user_simulator:
   model: gpt-4o-mini                         # OpenAI model for the user simulator
   temperature: 0.0                           # Deterministic responses
   max_tokens: 300
-  max_concurrent_api: 50                     # Max parallel API calls (rate limit safety)
+  max_concurrent_api: 15                     # Max parallel API calls (rate limit safety)
+```
+
+### Code Executor
+
+```yaml
+code_executor:
+  timeout: 10.0             # seconds per subprocess execution
+  partial_credit: true      # reward = fraction of passing assertions, not binary
 ```
 
 ### Training
 
 ```yaml
 training:
-  rollout_batch_size: 256                    # Episodes per iteration
+  rollout_batch_size: 32                     # Episodes per iteration
   ppo_epochs: 4                              # PPO update passes per batch
-  ppo_mini_batch_size: 16                    # Mini-batch size per GPU
+  ppo_mini_batch_size: 8                     # Mini-batch size per GPU
   clip_epsilon: 0.2                          # PPO clip range
   gamma: 1.0                                 # Discount factor (1.0 = no discounting)
   gae_lambda: 0.95                           # GAE smoothing
-  kl_coeff: 0.2                              # KL penalty (keeps policy near reference)
+  kl_coeff: 0.25                             # KL penalty (keeps policy near reference)
+  target_kl: 0.05                            # Early-exit PPO epoch when approx_kl exceeds this
   entropy_coeff: 0.01                        # Entropy bonus (prevents collapse)
   lr_policy: 5.0e-6                          # LoRA learning rate
   lr_value: 1.0e-4                           # Value head learning rate
   optimizer: adamw_8bit                      # 8-bit AdamW (saves ~8 GB vs full)
   warmup_steps: 20
   n_iterations: 80                           # Training iterations per d₁ setting
-  save_interval: 20                          # Save checkpoint every N iterations
+  save_interval: 5                           # Save checkpoint every N iterations
   eval_interval: 10                          # Run eval every N iterations
 ```
 
@@ -532,7 +551,7 @@ constraint:
   d1: 1                                      # Question budget (set to 0 or 1 for this run)
   lambda_init: 0.0                           # Starting value for λ₁
   lambda_max: 10.0                           # Maximum value for λ₁
-  lr_lambda: 0.05                            # Lagrange multiplier step size
+  lr_lambda: 0.1                             # Lagrange multiplier step size
   d2: 4                                      # Turn budget (soft, secondary constraint)
   lambda2_init: 0.0
   lambda2_max: 5.0
@@ -595,7 +614,7 @@ This was the most critical debugging finding in the project. HuggingFace's `mode
 
 This caused a systematic log-prob mismatch: during rollout, `log_softmax` over the filtered scores normalized over ~1-4 tokens, while `score()` during PPO update used a clean forward pass normalizing over the full 152k vocabulary. The same token received different log-probs depending on which path computed them, inflating `approx_kl` to ~3 and permanently saturating PPO's clipping mechanism.
 
-The fix was to stop using generate() scores entirely for log-prob computation. After `generate()` produces the token sequence, a separate forward pass computes old_log_probs from raw model logits - the exact same method `score()` uses. A diagnostic script (`scripts/debug_logprobs.py`) confirmed this produces diff=0.000000 on every token, bringing `approx_kl` down to ~0.007.
+The fix was to stop using generate() scores entirely for log-prob computation. After `generate()` produces the token sequence, a separate forward pass computes old_log_probs from raw model logits - the exact same method `score()` uses. This brings `approx_kl` down to ~0.007.
 
 The debugging process went through three stages:
 1. **Prefix scoring mismatch** brought approx_kl from ~12 to ~3 (rollout scored only 2 of 4-5 prefix tokens; fix: both sides skip prefix and score only continuation tokens)
