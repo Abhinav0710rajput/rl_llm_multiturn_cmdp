@@ -1,6 +1,6 @@
 # Constrained Clarification: Training LLM Agents to Ask Better Questions Under Budget Constraints
 
-This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
+This project trains a large language model (LLM) to ask optimal clarifying questions when given ambiguous coding problems - but under a strict budget on how many questions it can ask. The interaction is framed as a **Constrained Markov Decision Process (CMDP)**, where the agent must maximise code correctness while satisfying a hard constraint on average question count. It uses **Reinforcement Learning with PPO-Lagrangian** on top of **Qwen2.5-Coder-7B-Instruct** with LoRA adapters, evaluated on the **HumanEvalComm** benchmark.
 
 **Trained checkpoints on Hugging Face:**
 
