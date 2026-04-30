@@ -9,7 +9,7 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 
 **Contributors:** [Abhinav Rajput](https://github.com/Abhinav0710rajput) · [Acey Vogelstein](https://github.com/acv1229) · [Deepali Balakrishna Ksheersagar](https://github.com/Deepali-BK)
 
-**NYU Center for Data Science**
+**[NYU Center for Data Science](https://cds.nyu.edu/)**
 
 ---
 
