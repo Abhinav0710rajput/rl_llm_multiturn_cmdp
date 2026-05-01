@@ -1,4 +1,4 @@
-# Constrained Clarification: Training LLM Agents to Ask Better Questions Under Budget Constraints
+# To Ask or Not to Ask: Strategic Clarification in LLM Agents via CMDPs
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
@@ -124,7 +124,7 @@ Then load it before running:
 source .env  # if using a .env file
 ```
 
-**Cost estimate:** GPT-4o-mini charges ~$0.15 per 1M input tokens. With 256 episodes/iteration × 80 iterations × ~2 questions/episode × ~200 tokens/call ≈ ~8M tokens ≈ **~$1.20 per d₁ setting**.
+**Cost estimate:** GPT-4o-mini charges ~$0.15 per 1M input tokens. With 32 episodes/iteration × 80 iterations × ~2 questions/episode × ~200 tokens/call ≈ ~1M tokens ≈ **~$0.15 per d₁ setting**.
 
 ### HuggingFace Token (not required)
 
@@ -339,7 +339,7 @@ python scripts/train.py --d1 2 constraint.d1=2
 
 Each **iteration** consists of:
 
-1. **Rollout collection** (~5–6 min): 256 episodes run in parallel. The agent sees a degraded problem spec, generates `[ASK]` or `[ANSWER]` actions, and the environment responds. API calls to GPT-4o-mini happen asynchronously. Code execution happens in a subprocess sandbox.
+1. **Rollout collection** (~5–6 min): 32 episodes collected per iteration. The agent sees a degraded problem spec, generates `[ASK]` or `[ANSWER]` actions, and the environment responds. API calls to GPT-4o-mini happen asynchronously. Code execution happens in a subprocess sandbox.
 
 2. **Advantage computation**: GAE advantages are computed for three return streams: reward (pass@1), question cost, and turn cost.
 
