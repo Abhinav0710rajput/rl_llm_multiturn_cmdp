@@ -24,6 +24,8 @@ This project trains a large language model (LLM) to ask optimal clarifying quest
 - [System Prompts](#system-prompts)
 - [Training](#training)
 - [Evaluation](#evaluation)
+- [Results](#results)
+- [Key Takeaways](#key-takeaways)
 - [Trained Model Checkpoints](#trained-model-checkpoints)
 - [Configuration Reference](#configuration-reference)
 - [Key Design Decisions](#key-design-decisions)
@@ -38,11 +40,12 @@ When an LLM is given a vague coding task like *"Return list with elements increm
 
 This project trains the model to make that decision **optimally** - asking only when it is truly worth it - under a configurable budget `d₁` that caps the average number of questions per problem.
 
-We train two policies:
+We train three policies:
 - **d₁ = 0** - the agent learns to never ask; it must guess from the degraded spec alone
+- **d₁ = 0.5** - the agent may ask at most 0.5 questions on average per problem
 - **d₁ = 1** - the agent may ask at most 1 question on average per problem
 
-These two policies form the beginning of a **Pareto frontier**: a family of policies ranging from "never ask" to "ask freely", each optimal for its budget.
+These three policies trace a **Pareto frontier**: a family of policies ranging from "never ask" to "ask freely", each optimal for its budget.
 
 The training algorithm is **PPO-Lagrangian**, where a Lagrange multiplier `λ₁` automatically learns how expensive each question should be to satisfy the budget. No manual penalty tuning is needed.
 
@@ -301,13 +304,16 @@ Switch between modes via `environment.multi_question_mode` in `configs/default.y
 # Train d₁=0 policy (agent learns to never ask)
 python scripts/train.py --d1 0
 
+# Train d₁=0.5 policy (agent may ask ≤0.5 questions on average)
+python scripts/train.py --d1 0.5 constraint.d1=0.5
+
 # Train d₁=1 policy (agent may ask ≤1 question on average)
 python scripts/train.py --d1 1
 ```
 
-Train both sequentially:
+Train all three sequentially:
 ```bash
-python scripts/train.py --d1 0 && python scripts/train.py --d1 1
+python scripts/train.py --d1 0 && python scripts/train.py --d1 0.5 constraint.d1=0.5 && python scripts/train.py --d1 1
 ```
 
 ### Resume from a Checkpoint
@@ -359,7 +365,7 @@ Key metrics to monitor:
 
 **Total training time estimate:**
 - ~8–9 min/iteration × 80 iterations = ~11 hours per d₁ setting
-- d₁=0 and d₁=1 = ~22 hours total (run sequentially)
+- d₁=0, d₁=0.5, and d₁=1 = ~33 hours total (run sequentially)
 
 ### Training Logs
 
@@ -380,9 +386,9 @@ python scripts/evaluate.py --checkpoint checkpoints/d1_1/final --d1 1
 
 Results are saved to `outputs/eval/results_d1_1.json`.
 
-### Evaluate Both Policies and Plot the Pareto Frontier
+### Evaluate All Policies and Plot the Pareto Frontier
 
-After both d₁=0 and d₁=1 are trained, run the sweep in either of two modes:
+After all three policies (d₁=0, d₁=0.5, d₁=1) are trained, run the sweep in either of two modes:
 
 ```bash
 # Pareto over best-eval checkpoints (default) - uses checkpoints/d1_N/best/
@@ -414,6 +420,109 @@ Each sweep:
    0    0.4120     0.00       1.00     400
    1    0.5830     0.97       1.92     400
 ```
+
+---
+
+## Results
+
+**Eval set:** 469 problems (full HumanEvalComm eval split, all 7 degradation types) · **Eval temp:** 0.0 (greedy) · **Model:** Qwen2.5-Coder-7B-Instruct + LoRA (rank 16)
+
+Two evaluation modes are reported:
+- **MT pass@1** — multi-turn mode: the agent may ask clarifying questions before answering
+- **ST pass@1** — single-turn mode: the agent is told to write code immediately with no option to ask questions; measures raw code generation ability as a lower bound
+
+### Overall Summary
+
+| Policy | Checkpoint | MT pass@1 | 95% CI | Avg Qs | Δ vs Baseline | p |
+|--------|------------|-----------|--------|--------|--------------|---|
+| Baseline (untrained) | — | 0.685 | [0.648, 0.721] | 0.855 | — | — |
+| D1=1 | iter_0029 | **0.747** | [0.713, 0.781] | 0.846 | **+6.2pp** | p < 0.0001 |
+| D1=0.5 | iter_0069 | 0.660 | [0.624, 0.696] | 0.480 | −2.5pp | p = 0.173 (n.s.) |
+| D1=0 | iter_0049 | 0.604 | [0.567, 0.642] | 0.337 | **−8.0pp** | p < 0.0001 |
+
+The D1=1 policy is the only trained policy that strictly outperforms the untrained baseline. D1=0.5 is statistically indistinguishable from baseline. D1=0 significantly hurts performance.
+
+### By Degradation Type (D1=1 vs Baseline)
+
+| Type | n | Baseline MT | D1=1 MT | Gain | p |
+|------|---|-------------|---------|------|---|
+| 1a (alias ambiguity) | 100 | 0.743 | 0.765 | +2.2pp | p = 0.384 |
+| 1c (context ambiguity) | 99 | 0.833 | 0.877 | +4.4pp | p = 0.027 |
+| 1p (partial spec) | 100 | 0.636 | 0.716 | +8.0pp | p = 0.006 |
+| 2ac (alias + context) | 99 | 0.621 | 0.702 | +8.1pp | p = 0.002 |
+| 2ap (alias + partial) | 43 | 0.561 | 0.607 | +4.6pp | p = 0.316 |
+| 2cp (context + partial) | 21 | 0.502 | 0.706 | **+20.4pp** | p = 0.007 |
+| 3acp (all three) | 7 | 0.654 | 0.724 | +7.0pp | p = 0.474 |
+| **Overall** | **469** | **0.685** | **0.747** | **+6.2pp** | **p < 0.0001** |
+
+The largest gains are on the most degraded problem types (2cp, 2ac, 1p) — exactly where clarification is most valuable.
+
+### All Pairwise Comparisons (paired t-test, n=469)
+
+| Comparison | ΔMT | 95% CI | p |
+|------------|-----|--------|---|
+| D1=1 vs Baseline | +6.24pp | [+3.46pp, +9.03pp] | p < 0.0001 |
+| D1=0.5 vs Baseline | −2.48pp | [−6.04pp, +1.08pp] | p = 0.173 ✗ |
+| D1=0 vs Baseline | −8.03pp | [−11.56pp, −4.50pp] | p < 0.0001 |
+| D1=0.5 vs D1=1 | −8.72pp | [−12.21pp, −5.24pp] | p < 0.0001 |
+| D1=0 vs D1=1 | −14.27pp | [−17.93pp, −10.62pp] | p < 0.0001 |
+| D1=0 vs D1=0.5 | −5.55pp | [−8.41pp, −2.70pp] | p = 0.0001 |
+
+### Diminishing Returns: Question Budget vs. MT pass@1
+
+Each unit reduction in avg questions costs progressively more pass@1:
+
+| Policy | Avg Qs | MT pass@1 | Δ pass@1 per −0.1 Qs |
+|--------|--------|-----------|----------------------|
+| Baseline | 0.855 | 0.685 | — |
+| D1=1 (iter_0029) | 0.846 | 0.747 | +6.9pp (RL gain, not constraint cost) |
+| D1=0.5 (iter_0069) | 0.480 | 0.660 | −2.4pp per −0.1 Qs |
+| D1=0 (iter_0049) | 0.337 | 0.604 | −3.9pp per −0.1 Qs |
+
+The curve turns **negative** at D1=0: restricting questions below the model's natural rate hurts more than never training at all.
+
+---
+
+## Key Takeaways
+
+**1. RL training significantly improves multi-turn performance**
+The D1=1 policy (iter_0029) achieves a **+6.24pp gain** over the untrained baseline (paired t=4.39, p<0.0001, 95% CI [+3.5pp, +9.0pp]). This is the scientifically honest D1=1 result — chosen as the last checkpoint before memorization-driven instability sets in after iter ~50.
+
+**2. Gains are universal but concentrated on harder problem types**
+Every degradation type improves at iter_0029. The largest gains are on the most degraded problems: 2cp (+20.4pp, p=0.007), 2ac (+8.1pp, p=0.002), and 1p (+8.0pp, p=0.006). Gains on 1a (+2.2pp) and 2ap (+4.6pp) exist but are not individually significant.
+
+**3. The model learns *when* to ask, not just *how much* to ask**
+Average questions barely changes (0.855 → 0.846). The improvement comes from asking more strategically: fewer questions on easy types (1a: −0.07, 1c: −0.03) where clarification adds noise, and slightly more on hard types (2ap: +0.07, 2cp: +0.05) where it genuinely helps.
+
+**4. Answer quality also improves (0-question episodes)**
+When the D1=1 trained model answers directly (0 questions), its pass@1 is 0.792 vs 0.754 for baseline. RL training improved code generation quality, not just clarification strategy.
+
+**5. The Lagrange constraint barely activated for D1=1**
+λ₁ ≈ 0.000 throughout almost all of training. Budget=1 is effectively never binding — the model naturally asks ≤1 question on average. The constraint machinery works, but the natural question rate is already near the budget.
+
+**6. Original prompt outperforms few-shot prompt at baseline**
+The untrained model with the original prompt achieves MT pass@1 = 0.685, vs 0.586 for the few-shot prompt baseline — a **9.9pp advantage** before any training. Few-shot examples appear to hurt the model's natural clarification behavior.
+
+**7. D1=1 shows instability and overfitting beginning in the mid-30s**
+At iter 34, avg_Qs spikes to 1.094 (first and only budget breach), λ₁ briefly activates, and both avg_Qs and training reward become volatile. HumanEvalComm has 64 base problems × 302 training problems — by iter ~34, the model sees each base problem ~34 times on average, enough to memorize answers and stop asking. Iter_0029 is the last checkpoint before this instability.
+
+**8. D1=0.5 constraint is statistically significant at −8.7pp vs D1=1**
+The D1=0.5 policy (iter_0069) achieves pass@1=0.660 vs D1=1's 0.747 — an −8.7pp gap (p<0.0001, 95% CI [−12.21pp, −5.24pp]). The constraint is fully internalized (avg_Qs=0.480, exactly on budget). The cost is concentrated on types requiring clarification most: 1p (−14.2pp) and 2cp (−23.3pp).
+
+**9. D1=0 training collapses pass@1 to below baseline**
+Mid-train evals show pass@1 collapsing from 0.734 (iter 29) → 0.550 (iter 49) as λ₁ climbs and avg_Qs → 0. Full eval confirms MT pass@1 = 0.604 — **below the untrained baseline (0.685)**. Training with budget=0 is counterproductive.
+
+**10. ST pass@1 is effectively invariant to training (0.614–0.624 across all policies)**
+RL training does not meaningfully change raw coding ability. Across baseline, D1=1, D1=0.5, and D1=0, ST pass@1 ranges only 0.614–0.624 (+1.0pp across the full spectrum). The LoRA update affects question-asking behavior and MT strategy but not underlying code generation competence.
+
+**11. Asking 2+ questions is a failure signal**
+Across all policies, episodes with 2+ questions score lower than 1-question episodes. For D1=0.5: 2-Qs→0.588, 3-Qs→0.278, 6-Qs→0.000. Multiple questions indicate either poorly targeted asks, a problem genuinely unsolvable through clarification, or the model failing to use the answers it receives. A well-calibrated policy should rarely need more than 1 question per episode.
+
+**12. Diminishing — and eventually negative — returns to restricting questions**
+Each unit of question budget sacrificed costs progressively more pass@1. Going from D1=1 → D1=0.5 (−0.37 avg_Qs) costs 8.7pp, or ~2.4pp per −0.1 Qs. Going from D1=0.5 → D1=0 (−0.14 avg_Qs) costs another 5.6pp, or ~3.9pp per −0.1 Qs — a 60% steeper rate. The curve turns **negative** at D1=0: MT pass@1 (0.604) falls below the untrained baseline (0.685). The optimal operating point appears near D1=1 (≈ the model's natural question rate), where RL can improve question *quality* without paying a constraint cost.
+
+**13. D1=0 questions actively hurt performance (MT < ST)**
+D1=0 MT pass@1 (0.604) is below D1=0 ST pass@1 (0.624). When the D1=0 model asks a question (avg 0.337 per episode despite budget=0), the answer makes things worse. By-Qs breakdown: 0-Qs → MT=0.641 (n=346); 1-Qs → MT=0.537 (n=109). The policy learned to suppress questions but not to suppress them entirely — the residual questions are poorly targeted or the model fails to use the clarifications it receives.
 
 ---
 
